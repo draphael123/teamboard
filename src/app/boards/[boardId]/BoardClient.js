@@ -17,9 +17,27 @@ import { format } from 'date-fns'
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const COLUMNS = [
-  { id: 'todo',        label: 'To Do',       color: 'bg-gray-600' },
-  { id: 'in_progress', label: 'In Progress',  color: 'bg-brand-600' },
-  { id: 'done',        label: 'Done',         color: 'bg-green-600' },
+  {
+    id: 'todo',
+    label: 'To Do',
+    dotColor: '#64748b',
+    colClass: 'col-todo',
+    headerGradient: 'from-slate-500/20 to-transparent',
+  },
+  {
+    id: 'in_progress',
+    label: 'In Progress',
+    dotColor: '#2952ff',
+    colClass: 'col-in-progress',
+    headerGradient: 'from-brand-500/20 to-transparent',
+  },
+  {
+    id: 'done',
+    label: 'Done',
+    dotColor: '#10b981',
+    colClass: 'col-done',
+    headerGradient: 'from-emerald-500/20 to-transparent',
+  },
 ]
 
 const BOARD_COLORS = [
@@ -27,8 +45,11 @@ const BOARD_COLORS = [
   '#f59e0b', '#ef4444', '#ec4899', '#64748b',
 ]
 
-const PRIORITIES = { high: 'text-red-400', medium: 'text-yellow-400', low: 'text-gray-500' }
-const PRIORITY_LABELS = { high: 'High', medium: 'Medium', low: 'Low' }
+const PRIORITY_BADGE = {
+  high:   { cls: 'badge-high',   label: 'High' },
+  medium: { cls: 'badge-medium', label: 'Medium' },
+  low:    { cls: 'badge-low',    label: 'Low' },
+}
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 
@@ -242,7 +263,8 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
     <div className="flex flex-col h-screen overflow-hidden">
 
       {/* Board header */}
-      <header className="flex items-center justify-between px-7 py-4 border-b border-gray-800 shrink-0">
+      <header className="flex items-center justify-between px-7 py-4 shrink-0"
+              style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'rgba(7,7,15,0.8)', backdropFilter: 'blur(12px)' }}>
         <div className="flex items-center gap-3">
           <div
             className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0"
@@ -309,14 +331,16 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
             </button>
           )}
 
-          <span className="text-xs text-gray-600 bg-gray-800 px-2 py-1 rounded-full">
+          <span className="text-xs text-gray-400 px-2.5 py-1 rounded-full font-medium"
+                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
             {tasks.length} task{tasks.length !== 1 ? 's' : ''}
           </span>
         </div>
       </header>
 
       {/* Filter bar */}
-      <div className="flex items-center gap-3 px-7 py-3 border-b border-gray-800 shrink-0 bg-gray-950">
+      <div className="flex items-center gap-3 px-7 py-3 shrink-0"
+           style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(7,7,15,0.6)', backdropFilter: 'blur(8px)' }}>
         <div className="relative flex-1 max-w-xs">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
           <input
@@ -447,21 +471,31 @@ function DroppableColumn({ column, tasks, members, canEdit, onTaskClick, onAddTa
   return (
     <div
       ref={setNodeRef}
-      className={`w-72 shrink-0 flex flex-col rounded-xl border transition-colors
-        ${isOver ? 'border-brand-500 bg-brand-500/5' : 'bg-gray-900/50 border-gray-800'}`}
+      className={`w-72 shrink-0 flex flex-col rounded-2xl transition-all duration-200 ${column.colClass}
+        ${isOver ? 'ring-2 ring-brand-400 ring-offset-2 ring-offset-[#07070f] scale-[1.01]' : ''}`}
+      style={{ minHeight: '200px' }}
     >
-      {/* Column header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-        <div className="flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${column.color}`} />
-          <span className="text-sm font-semibold text-gray-200">{column.label}</span>
-          <span className="text-xs text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+      {/* Column header with gradient */}
+      <div className={`flex items-center justify-between px-4 py-3 rounded-t-2xl bg-gradient-to-r ${column.headerGradient}`}
+           style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="flex items-center gap-2.5">
+          <div className="w-2.5 h-2.5 rounded-full shadow-lg"
+               style={{ backgroundColor: column.dotColor, boxShadow: `0 0 8px ${column.dotColor}80` }} />
+          <span className="text-sm font-bold text-gray-100">{column.label}</span>
+          <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full min-w-[20px] text-center"
+                style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(156,163,175,0.9)' }}>
             {tasks.length}
           </span>
         </div>
         {canEdit && (
-          <button onClick={onAddTask} className="text-gray-600 hover:text-gray-300 transition-colors p-0.5 rounded">
-            <Plus size={15} />
+          <button
+            onClick={onAddTask}
+            className="w-6 h-6 rounded-md flex items-center justify-center transition-all"
+            style={{ color: 'rgba(156,163,175,0.6)' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = 'white' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(156,163,175,0.6)' }}
+          >
+            <Plus size={14} />
           </button>
         )}
       </div>
@@ -474,15 +508,19 @@ function DroppableColumn({ column, tasks, members, canEdit, onTaskClick, onAddTa
             task={task}
             onClick={() => onTaskClick(task)}
             isDragging={task.id === draggingTaskId}
+            columnColor={column.dotColor}
           />
         ))}
         {canEdit && (
           <button
             onClick={onAddTask}
-            className="w-full text-left text-xs text-gray-600 hover:text-gray-400 flex items-center gap-1.5 py-2 px-2
-                       rounded-lg hover:bg-gray-800 transition-colors"
+            className="w-full text-left text-xs flex items-center gap-1.5 py-2 px-2.5
+                       rounded-xl transition-all duration-150"
+            style={{ color: 'rgba(100,116,139,0.8)' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = 'rgba(156,163,175,0.9)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(100,116,139,0.8)' }}
           >
-            <Plus size={13} /> Add task
+            <Plus size={12} /> Add task
           </button>
         )}
       </div>
@@ -492,61 +530,92 @@ function DroppableColumn({ column, tasks, members, canEdit, onTaskClick, onAddTa
 
 // ── Draggable Task Card ────────────────────────────────────────────────────────
 
-function DraggableTaskCard({ task, onClick, isDragging }) {
+function DraggableTaskCard({ task, onClick, isDragging, columnColor }) {
   const { attributes, listeners, setNodeRef, transform } = useDraggable({ id: task.id })
 
-  const style = transform ? {
-    transform: CSS.Translate.toString(transform),
-  } : undefined
+  const badge = PRIORITY_BADGE[task.priority] || PRIORITY_BADGE.low
+  const isOverdue = task.due_date && new Date(task.due_date) < new Date() && task.status !== 'done'
+
+  const style = transform ? { transform: CSS.Translate.toString(transform) } : undefined
 
   return (
     <div
       ref={setNodeRef}
-      style={style}
-      className={`card p-3.5 transition-all group space-y-2.5 relative
-        ${isDragging ? 'opacity-40 border-dashed' : 'hover:border-gray-700 hover:bg-gray-800/80'}`}
+      style={{
+        ...style,
+        borderLeft: `3px solid ${columnColor}40`,
+      }}
+      className={`rounded-xl p-3.5 transition-all duration-150 group space-y-2.5 relative cursor-pointer
+        ${isDragging ? 'opacity-40' : ''}`}
+      onMouseEnter={e => {
+        if (!isDragging) {
+          e.currentTarget.style.borderLeftColor = columnColor
+          e.currentTarget.style.boxShadow = `0 0 0 1px rgba(255,255,255,0.1), 0 4px 16px rgba(0,0,0,0.4), 0 0 12px ${columnColor}20`
+          e.currentTarget.style.transform = 'translateY(-1px)'
+        }
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.borderLeftColor = `${columnColor}40`
+        e.currentTarget.style.boxShadow = ''
+        e.currentTarget.style.transform = ''
+      }}
+      onClick={onClick}
+      {...(!isDragging ? {} : {})}
+      style={{
+        ...style,
+        background: 'rgba(14,14,26,0.8)',
+        border: '1px solid rgba(255,255,255,0.07)',
+        borderLeft: `3px solid ${columnColor}40`,
+        borderRadius: '12px',
+      }}
     >
       {/* Drag handle */}
       <div
         {...attributes}
         {...listeners}
-        className="absolute top-3 right-3 text-gray-700 hover:text-gray-400 cursor-grab active:cursor-grabbing opacity-0
-                   group-hover:opacity-100 transition-opacity p-0.5 rounded"
+        onClick={e => e.stopPropagation()}
+        className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity
+                   cursor-grab active:cursor-grabbing p-0.5 rounded"
+        style={{ color: 'rgba(100,116,139,0.7)' }}
       >
         <GripVertical size={13} />
       </div>
 
-      {/* Card content - click to open */}
-      <button onClick={onClick} className="w-full text-left space-y-2.5">
-        <p className="text-sm text-gray-200 font-medium leading-snug group-hover:text-white pr-5">
-          {task.title}
-        </p>
-        {task.description && (
-          <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{task.description}</p>
-        )}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className={`text-[11px] font-medium ${PRIORITIES[task.priority] || 'text-gray-500'}`}>
-              <Flag size={11} className="inline mr-0.5" />{PRIORITY_LABELS[task.priority]}
+      {/* Title */}
+      <p className="text-sm text-gray-200 font-semibold leading-snug pr-5 group-hover:text-white transition-colors">
+        {task.title}
+      </p>
+
+      {task.description && (
+        <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{task.description}</p>
+      )}
+
+      {/* Meta row */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={badge.cls}>
+            <Flag size={9} />{badge.label}
+          </span>
+          {task.due_date && (
+            <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium
+              ${isOverdue
+                ? 'text-red-400 bg-red-500/10 border border-red-500/20'
+                : 'text-gray-500 bg-white/5 border border-white/8'}`}>
+              <Calendar size={9} />
+              {format(new Date(task.due_date), 'MMM d')}
             </span>
-            {task.due_date && (
-              <span className={`text-[11px] flex items-center gap-0.5
-                ${new Date(task.due_date) < new Date() && task.status !== 'done' ? 'text-red-400' : 'text-gray-600'}`}>
-                <Calendar size={10} />
-                {format(new Date(task.due_date), 'MMM d')}
-              </span>
-            )}
-          </div>
-          {task.assignee && (
-            <div
-              title={task.assignee.full_name || task.assignee.email}
-              className="w-6 h-6 rounded-full bg-brand-700 flex items-center justify-center text-[10px] font-bold text-white shrink-0"
-            >
-              {(task.assignee.full_name || task.assignee.email || '?')[0].toUpperCase()}
-            </div>
           )}
         </div>
-      </button>
+        {task.assignee && (
+          <div
+            title={task.assignee.full_name || task.assignee.email}
+            className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+            style={{ background: 'linear-gradient(135deg, #2952ff, #8b5cf6)' }}
+          >
+            {(task.assignee.full_name || task.assignee.email || '?')[0].toUpperCase()}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

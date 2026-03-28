@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, X, Layers, ChevronRight, Settings, Trash2, AlertCircle } from 'lucide-react'
+import { Plus, X, Layers, Settings, Trash2, AlertCircle, Sparkles } from 'lucide-react'
 
 const BOARD_COLORS = [
   '#2952ff', '#8b5cf6', '#06b6d4', '#10b981',
@@ -237,24 +237,31 @@ export default function DashboardClient({ boards: initialBoards, user }) {
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-gray-100">
+          <h1 className="text-2xl font-bold text-white">
             Good {timeOfDay()}, {user?.full_name?.split(' ')[0] || 'there'} 👋
           </h1>
-          <p className="text-gray-500 text-sm mt-1">Here are all your boards.</p>
+          <p className="text-sm mt-1" style={{ color: 'rgba(107,114,128,0.9)' }}>
+            {boards.length > 0 ? `You have ${boards.length} board${boards.length !== 1 ? 's' : ''}.` : 'Create your first board to get started.'}
+          </p>
         </div>
         <button onClick={openCreate} className="btn-primary flex items-center gap-2">
-          <Plus size={16} /> New Board
+          <Sparkles size={15} /> New Board
         </button>
       </div>
 
       {/* Boards grid */}
       {boards.length === 0 ? (
-        <div className="text-center py-20">
-          <Layers size={40} className="text-gray-700 mx-auto mb-4" />
-          <p className="text-gray-400 font-medium">No boards yet</p>
-          <p className="text-gray-600 text-sm mt-1">Create your first board to get started.</p>
-          <button onClick={openCreate} className="btn-primary mt-5 inline-flex items-center gap-2">
-            <Plus size={16} /> Create Board
+        <div className="text-center py-24">
+          <div className="w-16 h-16 rounded-2xl mx-auto mb-5 flex items-center justify-center"
+               style={{ background: 'linear-gradient(135deg, rgba(41,82,255,0.15), rgba(139,92,246,0.15))', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <Layers size={28} style={{ color: 'rgba(77,116,255,0.8)' }} />
+          </div>
+          <p className="font-bold text-white text-lg">No boards yet</p>
+          <p className="text-sm mt-1.5 mb-6" style={{ color: 'rgba(107,114,128,0.9)' }}>
+            Create your first board and pick a template to hit the ground running.
+          </p>
+          <button onClick={openCreate} className="btn-primary inline-flex items-center gap-2">
+            <Sparkles size={15} /> Create your first board
           </button>
         </div>
       ) : (
@@ -270,11 +277,30 @@ export default function DashboardClient({ boards: initialBoards, user }) {
           ))}
           <button
             onClick={openCreate}
-            className="card border-dashed border-gray-700 flex flex-col items-center justify-center gap-2
-                       h-36 text-gray-600 hover:text-gray-400 hover:border-gray-500 transition-colors cursor-pointer"
+            className="flex flex-col items-center justify-center gap-2 h-40 rounded-2xl cursor-pointer transition-all duration-200"
+            style={{
+              background: 'rgba(14,14,26,0.4)',
+              border: '2px dashed rgba(255,255,255,0.1)',
+              color: 'rgba(100,116,139,0.8)',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.borderColor = 'rgba(41,82,255,0.4)'
+              e.currentTarget.style.color = 'rgba(77,116,255,0.9)'
+              e.currentTarget.style.background = 'rgba(41,82,255,0.05)'
+              e.currentTarget.style.transform = 'translateY(-2px)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'
+              e.currentTarget.style.color = 'rgba(100,116,139,0.8)'
+              e.currentTarget.style.background = 'rgba(14,14,26,0.4)'
+              e.currentTarget.style.transform = ''
+            }}
           >
-            <Plus size={20} />
-            <span className="text-sm font-medium">New Board</span>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+                 style={{ background: 'rgba(41,82,255,0.1)', border: '1px solid rgba(41,82,255,0.2)' }}>
+              <Plus size={18} style={{ color: 'rgba(77,116,255,0.8)' }} />
+            </div>
+            <span className="text-sm font-semibold">New Board</span>
           </button>
         </div>
       )}
@@ -470,40 +496,70 @@ export default function DashboardClient({ boards: initialBoards, user }) {
 // ── Board Card ─────────────────────────────────────────────────────────────────
 
 function BoardCard({ board, onClick, onEdit, onDelete }) {
+  const color = board.color || '#2952ff'
+
   return (
     <div className="relative group">
       <button
         onClick={onClick}
-        className="card p-5 text-left hover:border-gray-700 hover:bg-gray-800/50 transition-all cursor-pointer
-                   flex flex-col gap-3 h-36 w-full"
+        className="relative text-left cursor-pointer flex flex-col overflow-hidden w-full h-40 rounded-2xl transition-all duration-200"
+        style={{
+          background: 'rgba(14,14,26,0.85)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.boxShadow = `0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px ${color}40, 0 0 20px ${color}20`
+          e.currentTarget.style.transform = 'translateY(-2px)'
+          e.currentTarget.style.borderColor = `${color}40`
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.4)'
+          e.currentTarget.style.transform = ''
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
+        }}
       >
-        <div className="flex items-start justify-between">
-          <div
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-bold text-sm"
-            style={{ backgroundColor: board.color || '#2952ff' }}
-          >
-            {board.name.substring(0, 2).toUpperCase()}
+        {/* Color band at top */}
+        <div className="h-1.5 w-full shrink-0" style={{ background: `linear-gradient(90deg, ${color}, ${color}80)` }} />
+
+        {/* Subtle glow blob */}
+        <div className="absolute top-0 left-0 w-full h-full pointer-events-none"
+             style={{ background: `radial-gradient(ellipse at 10% 0%, ${color}18 0%, transparent 60%)` }} />
+
+        <div className="flex-1 p-5 flex flex-col justify-between relative z-10">
+          <div className="flex items-start justify-between">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-lg"
+              style={{ background: `linear-gradient(135deg, ${color}, ${color}99)`, boxShadow: `0 4px 12px ${color}50` }}
+            >
+              {board.name.substring(0, 2).toUpperCase()}
+            </div>
+            <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(156,163,175,0.8)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              {board.userRole}
+            </span>
           </div>
-          <span className="text-[11px] text-gray-600 font-medium uppercase tracking-wide bg-gray-800 px-2 py-0.5 rounded-full">
-            {board.userRole}
-          </span>
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-gray-100 text-sm truncate group-hover:text-white">{board.name}</p>
-          {board.description && (
-            <p className="text-gray-500 text-xs mt-0.5 line-clamp-2">{board.description}</p>
-          )}
+          <div className="min-w-0">
+            <p className="font-bold text-white text-sm truncate">{board.name}</p>
+            {board.description && (
+              <p className="text-xs mt-0.5 line-clamp-1" style={{ color: 'rgba(107,114,128,0.9)' }}>
+                {board.description}
+              </p>
+            )}
+          </div>
         </div>
       </button>
 
-      {/* Owner actions — appear on hover */}
+      {/* Owner actions */}
       {(onEdit || onDelete) && (
-        <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute top-4 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
           {onEdit && (
             <button
               onClick={onEdit}
-              className="w-6 h-6 rounded-md bg-gray-800 hover:bg-gray-700 flex items-center justify-center
-                         text-gray-500 hover:text-gray-200 transition-colors"
+              className="w-6 h-6 rounded-lg flex items-center justify-center transition-all"
+              style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(156,163,175,0.8)' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(41,82,255,0.3)'; e.currentTarget.style.color = 'white' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(0,0,0,0.6)'; e.currentTarget.style.color = 'rgba(156,163,175,0.8)' }}
               title="Edit board"
             >
               <Settings size={11} />
@@ -512,8 +568,10 @@ function BoardCard({ board, onClick, onEdit, onDelete }) {
           {onDelete && (
             <button
               onClick={onDelete}
-              className="w-6 h-6 rounded-md bg-gray-800 hover:bg-red-500/20 flex items-center justify-center
-                         text-gray-500 hover:text-red-400 transition-colors"
+              className="w-6 h-6 rounded-lg flex items-center justify-center transition-all"
+              style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(156,163,175,0.8)' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.3)'; e.currentTarget.style.color = '#f87171' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(0,0,0,0.6)'; e.currentTarget.style.color = 'rgba(156,163,175,0.8)' }}
               title="Delete board"
             >
               <Trash2 size={11} />
