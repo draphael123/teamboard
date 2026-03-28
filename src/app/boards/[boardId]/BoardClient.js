@@ -4,8 +4,8 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus, X, Calendar, User, Flag, MessageSquare, Trash2,
-  Settings, UserPlus, Bell, Search, ChevronDown, GripVertical,
-  Check, AlertCircle,
+  Settings, UserPlus, Bell, Search, GripVertical,
+  Check, AlertCircle, Tag, CheckSquare, Square,
 } from 'lucide-react'
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
@@ -49,6 +49,29 @@ const PRIORITY_BADGE = {
   high:   { cls: 'badge-high',   label: 'High' },
   medium: { cls: 'badge-medium', label: 'Medium' },
   low:    { cls: 'badge-low',    label: 'Low' },
+}
+
+const LABEL_OPTIONS = [
+  { id: 'bug',      color: '#ef4444', text: 'Bug' },
+  { id: 'feature',  color: '#2952ff', text: 'Feature' },
+  { id: 'blocked',  color: '#f59e0b', text: 'Blocked' },
+  { id: 'design',   color: '#8b5cf6', text: 'Design' },
+  { id: 'research', color: '#06b6d4', text: 'Research' },
+  { id: 'urgent',   color: '#ec4899', text: 'Urgent' },
+  { id: 'infra',    color: '#10b981', text: 'Infra' },
+  { id: 'docs',     color: '#64748b', text: 'Docs' },
+]
+
+async function fireConfetti() {
+  try {
+    const { default: confetti } = await import('canvas-confetti')
+    confetti({
+      particleCount: 90,
+      spread: 65,
+      origin: { y: 0.6 },
+      colors: ['#2952ff', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ec4899'],
+    })
+  } catch (_) { /* ignore if confetti unavailable */ }
 }
 
 // ── API helpers ────────────────────────────────────────────────────────────────
@@ -96,6 +119,33 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
   // DnD sensors
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
 
+  // Refs
+  const searchRef = useRef(null)
+
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
+  useEffect(() => {
+    function handleKeyDown(e) {
+      const tag = e.target.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault()
+        setShowNewTask('todo')
+      } else if (e.key === '/') {
+        e.preventDefault()
+        searchRef.current?.focus()
+      } else if (e.key === 'Escape') {
+        setActiveTask(null)
+        setShowNewTask(null)
+        setShowInvite(false)
+        setShowSettings(false)
+        setShowNotifDropdown(false)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   // ── Polling ────────────────────────────────────────────────────────────────
 
   const pollTasks = useCallback(async () => {
@@ -138,6 +188,7 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
   }
 
   async function updateTask(id, updates) {
+    const prevTask = tasks.find(t => t.id === id)
     const { data, ok } = await apiFetch(`/api/boards/${boardId}/tasks/${id}`, {
       method: 'PATCH',
       body: updates,
@@ -145,6 +196,7 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
     if (ok) {
       setTasks(prev => prev.map(t => t.id === id ? data : t))
       if (activeTask?.id === id) setActiveTask(data)
+      if (updates.status === 'done' && prevTask?.status !== 'done') fireConfetti()
     }
     return { ok, data, error: ok ? null : data.error }
   }
@@ -159,8 +211,10 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
   }
 
   async function moveTask(id, newStatus) {
+    const prevTask = tasks.find(t => t.id === id)
     // Optimistic update
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status: newStatus } : t))
+    if (newStatus === 'done' && prevTask?.status !== 'done') fireConfetti()
     await apiFetch(`/api/boards/${boardId}/tasks/${id}`, {
       method: 'PATCH',
       body: { status: newStatus },
@@ -344,8 +398,9 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
         <div className="relative flex-1 max-w-xs">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
           <input
+            ref={searchRef}
             className="input pl-8 py-1.5 text-xs h-8"
-            placeholder="Search tasks…"
+            placeholder="Search tasks… (/)"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
           />
@@ -590,6 +645,18 @@ function DraggableTaskCard({ task, onClick, isDragging, columnColor }) {
         <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{task.description}</p>
       )}
 
+      {/* Label chips */}
+      {task.labels?.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {task.labels.map(l => (
+            <span key={l.id} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                  style={{ background: `${l.color}20`, color: l.color, border: `1px solid ${l.color}30` }}>
+              {l.text}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Meta row */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -603,6 +670,12 @@ function DraggableTaskCard({ task, onClick, isDragging, columnColor }) {
                 : 'text-gray-500 bg-white/5 border border-white/8'}`}>
               <Calendar size={9} />
               {format(new Date(task.due_date), 'MMM d')}
+            </span>
+          )}
+          {task.subtasks?.length > 0 && (
+            <span className="text-[10px] font-medium text-gray-600 flex items-center gap-0.5">
+              <CheckSquare size={9} />
+              {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
             </span>
           )}
         </div>
@@ -717,15 +790,18 @@ function NewTaskModal({ status, members, onClose, onCreate }) {
 // ── Task Detail Modal ──────────────────────────────────────────────────────────
 
 function TaskDetailModal({ task, boardId, members, currentUser, canEdit, onClose, onUpdate, onDelete, onMove }) {
-  const [title, setTitle]       = useState(task.title)
+  const [title, setTitle]           = useState(task.title)
   const [description, setDescription] = useState(task.description || '')
-  const [priority, setPriority] = useState(task.priority)
+  const [priority, setPriority]     = useState(task.priority)
   const [assignedTo, setAssignedTo] = useState(task.assigned_to || '')
-  const [dueDate, setDueDate]   = useState(task.due_date || '')
-  const [status, setStatus]     = useState(task.status)
-  const [saving, setSaving]     = useState(false)
-  const [comment, setComment]   = useState('')
-  const [comments, setComments] = useState([])
+  const [dueDate, setDueDate]       = useState(task.due_date || '')
+  const [status, setStatus]         = useState(task.status)
+  const [labels, setLabels]         = useState(task.labels || [])
+  const [subtasks, setSubtasks]     = useState(task.subtasks || [])
+  const [newSubtask, setNewSubtask] = useState('')
+  const [saving, setSaving]         = useState(false)
+  const [comment, setComment]       = useState('')
+  const [comments, setComments]     = useState([])
   const [loadingComments, setLoadingComments] = useState(true)
   const [addingComment, setAddingComment] = useState(false)
   const commentsEndRef = useRef(null)
@@ -755,8 +831,37 @@ function TaskDetailModal({ task, boardId, members, currentUser, canEdit, onClose
       assigned_to: assignedTo || null,
       due_date: dueDate || null,
       status,
+      labels,
     })
     setSaving(false)
+  }
+
+  function toggleLabel(labelOption) {
+    setLabels(prev => {
+      const exists = prev.find(l => l.id === labelOption.id)
+      return exists ? prev.filter(l => l.id !== labelOption.id) : [...prev, labelOption]
+    })
+  }
+
+  async function addSubtask(e) {
+    e.preventDefault()
+    if (!newSubtask.trim()) return
+    const updated = [...subtasks, { id: crypto.randomUUID(), text: newSubtask.trim(), completed: false }]
+    setSubtasks(updated)
+    setNewSubtask('')
+    await onUpdate(task.id, { subtasks: updated })
+  }
+
+  async function toggleSubtask(id) {
+    const updated = subtasks.map(s => s.id === id ? { ...s, completed: !s.completed } : s)
+    setSubtasks(updated)
+    await onUpdate(task.id, { subtasks: updated })
+  }
+
+  async function deleteSubtask(id) {
+    const updated = subtasks.filter(s => s.id !== id)
+    setSubtasks(updated)
+    await onUpdate(task.id, { subtasks: updated })
   }
 
   async function handleAddComment(e) {
@@ -859,6 +964,103 @@ function TaskDetailModal({ task, boardId, members, currentUser, canEdit, onClose
               {saving ? 'Saving…' : 'Save changes'}
             </button>
           )}
+
+          {/* Labels */}
+          <div>
+            <h3 className="text-sm font-semibold text-gray-300 mb-2.5 flex items-center gap-1.5">
+              <Tag size={13} /> Labels
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {LABEL_OPTIONS.map(opt => {
+                const active = labels.some(l => l.id === opt.id)
+                return (
+                  <button
+                    key={opt.id}
+                    onClick={() => canEdit && toggleLabel(opt)}
+                    disabled={!canEdit}
+                    className="text-xs font-semibold px-2.5 py-1 rounded-full transition-all"
+                    style={active
+                      ? { background: `${opt.color}25`, color: opt.color, border: `1px solid ${opt.color}50`, boxShadow: `0 0 8px ${opt.color}30` }
+                      : { background: 'rgba(255,255,255,0.04)', color: 'rgba(107,114,128,0.8)', border: '1px solid rgba(255,255,255,0.08)' }}
+                  >
+                    {active && <span className="mr-1">✓</span>}{opt.text}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Subtasks */}
+          <div>
+            <h3 className="text-sm font-semibold text-gray-300 mb-2.5 flex items-center gap-1.5">
+              <CheckSquare size={13} />
+              Subtasks
+              {subtasks.length > 0 && (
+                <span className="text-xs font-normal text-gray-500 ml-1">
+                  {subtasks.filter(s => s.completed).length}/{subtasks.length}
+                </span>
+              )}
+            </h3>
+
+            {/* Progress bar */}
+            {subtasks.length > 0 && (
+              <div className="h-1 rounded-full mb-3 overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${(subtasks.filter(s => s.completed).length / subtasks.length) * 100}%`,
+                    background: 'linear-gradient(90deg,#2952ff,#10b981)',
+                  }}
+                />
+              </div>
+            )}
+
+            <div className="space-y-1.5 mb-3">
+              {subtasks.map(s => (
+                <div key={s.id} className="flex items-center gap-2.5 group/sub rounded-lg px-2 py-1.5 transition-colors"
+                     style={{ background: 'rgba(255,255,255,0.02)' }}
+                     onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                     onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}>
+                  <button
+                    onClick={() => canEdit && toggleSubtask(s.id)}
+                    disabled={!canEdit}
+                    className="shrink-0 transition-colors"
+                    style={{ color: s.completed ? '#10b981' : 'rgba(107,114,128,0.6)' }}
+                  >
+                    {s.completed ? <CheckSquare size={15} /> : <Square size={15} />}
+                  </button>
+                  <span className={`flex-1 text-sm ${s.completed ? 'line-through text-gray-600' : 'text-gray-300'}`}>
+                    {s.text}
+                  </span>
+                  {canEdit && (
+                    <button
+                      onClick={() => deleteSubtask(s.id)}
+                      className="opacity-0 group-hover/sub:opacity-100 transition-opacity p-0.5 rounded"
+                      style={{ color: 'rgba(107,114,128,0.6)' }}
+                      onMouseEnter={e => e.currentTarget.style.color = '#f87171'}
+                      onMouseLeave={e => e.currentTarget.style.color = 'rgba(107,114,128,0.6)'}
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {canEdit && (
+              <form onSubmit={addSubtask} className="flex gap-2">
+                <input
+                  className="input flex-1 text-sm py-1.5"
+                  placeholder="Add a subtask…"
+                  value={newSubtask}
+                  onChange={e => setNewSubtask(e.target.value)}
+                />
+                <button type="submit" className="btn-primary px-3 py-1.5 text-xs" disabled={!newSubtask.trim()}>
+                  Add
+                </button>
+              </form>
+            )}
+          </div>
 
           {/* Comments */}
           <div>

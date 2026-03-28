@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, X, Layers, Settings, Trash2, AlertCircle, Sparkles } from 'lucide-react'
 
@@ -103,6 +103,15 @@ async function apiFetch(url, options = {}) {
 export default function DashboardClient({ boards: initialBoards, user }) {
   const router = useRouter()
   const [boards, setBoards] = useState(initialBoards)
+  const [sortBy, setSortBy] = useState('recent')   // recent | name | oldest
+
+  const sortedBoards = useMemo(() => {
+    return [...boards].sort((a, b) => {
+      if (sortBy === 'name') return a.name.localeCompare(b.name)
+      if (sortBy === 'oldest') return new Date(a.created_at) - new Date(b.created_at)
+      return new Date(b.created_at) - new Date(a.created_at)
+    })
+  }, [boards, sortBy])
 
   // Create flow
   const [showCreate, setShowCreate] = useState(false)
@@ -234,7 +243,6 @@ export default function DashboardClient({ boards: initialBoards, user }) {
 
   return (
     <div className="p-8">
-      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white">
@@ -244,9 +252,20 @@ export default function DashboardClient({ boards: initialBoards, user }) {
             {boards.length > 0 ? `You have ${boards.length} board${boards.length !== 1 ? 's' : ''}.` : 'Create your first board to get started.'}
           </p>
         </div>
-        <button onClick={openCreate} className="btn-primary flex items-center gap-2">
-          <Sparkles size={15} /> New Board
-        </button>
+        <div className="flex items-center gap-3">
+          <select
+            className="input w-36 py-2 text-sm"
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value)}
+          >
+            <option value="recent">Most recent</option>
+            <option value="name">Name A–Z</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+          <button onClick={openCreate} className="btn-primary flex items-center gap-2">
+            <Sparkles size={15} /> New Board
+          </button>
+        </div>
       </div>
 
       {/* Boards grid */}
@@ -266,7 +285,7 @@ export default function DashboardClient({ boards: initialBoards, user }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {boards.map(board => (
+          {sortedBoards.map(board => (
             <BoardCard
               key={board.id}
               board={board}
@@ -493,6 +512,39 @@ export default function DashboardClient({ boards: initialBoards, user }) {
   )
 }
 
+// ── Task Progress Bar ──────────────────────────────────────────────────────────
+
+function TaskProgressBar({ counts }) {
+  if (!counts) return null
+  const total = (counts.todo || 0) + (counts.in_progress || 0) + (counts.done || 0)
+  if (total === 0) return (
+    <p className="text-[10px] mt-1.5" style={{ color: 'rgba(75,85,99,0.7)' }}>No tasks yet</p>
+  )
+  const todoPct = (counts.todo / total) * 100
+  const inProgPct = (counts.in_progress / total) * 100
+  const donePct = (counts.done / total) * 100
+
+  return (
+    <div className="mt-2">
+      <div className="flex rounded-full overflow-hidden h-1.5 gap-px" style={{ background: 'rgba(255,255,255,0.06)' }}>
+        {counts.done > 0 && (
+          <div style={{ width: `${donePct}%`, background: '#10b981', transition: 'width 0.3s' }} />
+        )}
+        {counts.in_progress > 0 && (
+          <div style={{ width: `${inProgPct}%`, background: '#2952ff', transition: 'width 0.3s' }} />
+        )}
+        {counts.todo > 0 && (
+          <div style={{ width: `${todoPct}%`, background: 'rgba(100,116,139,0.5)', transition: 'width 0.3s' }} />
+        )}
+      </div>
+      <p className="text-[10px] mt-1" style={{ color: 'rgba(75,85,99,0.8)' }}>
+        {counts.done}/{total} done
+        {counts.in_progress > 0 && <span className="ml-1.5" style={{ color: 'rgba(77,116,255,0.7)' }}>{counts.in_progress} in progress</span>}
+      </p>
+    </div>
+  )
+}
+
 // ── Board Card ─────────────────────────────────────────────────────────────────
 
 function BoardCard({ board, onClick, onEdit, onDelete }) {
@@ -546,6 +598,8 @@ function BoardCard({ board, onClick, onEdit, onDelete }) {
                 {board.description}
               </p>
             )}
+            {/* Task progress bar */}
+            <TaskProgressBar counts={board.taskCounts} />
           </div>
         </div>
       </button>
