@@ -10,7 +10,11 @@ import {
   Hash, Link2, ToggleLeft, AlignLeft, ChevronDown,
   Sliders, Edit2, GripHorizontal, ArrowUpDown,
   ExternalLink, ChevronRight, ChevronLeft,
+  BarChart2, Download, Layers, Copy, Users, Activity,
+  Clock, AlertTriangle,
 } from 'lucide-react'
+import AnalyticsModal from './AnalyticsModal'
+import GlobalSearchModal from './GlobalSearchModal'
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   useDroppable, useDraggable,
@@ -215,6 +219,24 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
   const [showNotifDropdown, setShowNotifDropdown] = useState(false)
   const notifRef = useRef(null)
 
+  // Bulk select
+  const [bulkMode, setBulkMode]             = useState(false)
+  const [selectedTaskIds, setSelectedTaskIds] = useState(new Set())
+
+  // Swimlanes
+  const [swimlaneBy, setSwimlaneBy] = useState('none')
+
+  // Analytics / Global Search
+  const [showAnalytics, setShowAnalytics]         = useState(false)
+  const [showGlobalSearch, setShowGlobalSearch]   = useState(false)
+
+  // Inline edit
+  const [editingTaskId, setEditingTaskId]   = useState(null)
+  const [editingTitle, setEditingTitle]     = useState('')
+
+  // WIP limits (from board settings)
+  const wipLimits = board.settings?.wip_limits || {}
+
   // DnD sensors
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
   const searchRef = useRef(null)
@@ -224,13 +246,19 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
   useEffect(() => {
     function handleKeyDown(e) {
       const tag = e.target.tagName
+      if (e.key === 'Escape') {
+        setActiveTask(null); setShowNewTask(null)
+        setShowInvite(false); setShowSettings(false); setShowNotifDropdown(false)
+        setShowAnalytics(false); setShowGlobalSearch(false)
+        setBulkMode(false); setSelectedTaskIds(new Set())
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault(); setShowGlobalSearch(true); return
+      }
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); setShowNewTask('todo') }
       else if (e.key === '/') { e.preventDefault(); searchRef.current?.focus() }
-      else if (e.key === 'Escape') {
-        setActiveTask(null); setShowNewTask(null)
-        setShowInvite(false); setShowSettings(false); setShowNotifDropdown(false)
-      }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
@@ -329,6 +357,88 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
     const { ok } = await apiFetch(`/api/boards/${boardId}/fields/${fieldId}`, { method: 'DELETE' })
     if (ok) setBoardFields(prev => prev.filter(f => f.id !== fieldId))
     return { ok }
+  }
+
+  // ── Bulk actions ─────────────────────────────────────────────────────────
+
+  function toggleSelectTask(id) {
+    setSelectedTaskIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selectedTaskIds.size === filteredTasks.length) {
+      setSelectedTaskIds(new Set())
+    } else {
+      setSelectedTaskIds(new Set(filteredTasks.map(t => t.id)))
+    }
+  }
+
+  async function bulkMove(newStatus) {
+    const ids = [...selectedTaskIds]
+    await Promise.all(ids.map(id => apiFetch(`/api/boards/${boardId}/tasks/${id}`, { method: 'PATCH', body: { status: newStatus } })))
+    setTasks(prev => prev.map(t => selectedTaskIds.has(t.id) ? { ...t, status: newStatus } : t))
+    setSelectedTaskIds(new Set())
+  }
+
+  async function bulkAssign(userId) {
+    const ids = [...selectedTaskIds]
+    await Promise.all(ids.map(id => apiFetch(`/api/boards/${boardId}/tasks/${id}`, { method: 'PATCH', body: { assigned_to: userId || null } })))
+    await pollTasks()
+    setSelectedTaskIds(new Set())
+  }
+
+  async function bulkDelete() {
+    if (!confirm(`Delete ${selectedTaskIds.size} task(s)? This cannot be undone.`)) return
+    const ids = [...selectedTaskIds]
+    await Promise.all(ids.map(id => apiFetch(`/api/boards/${boardId}/tasks/${id}`, { method: 'DELETE' })))
+    setTasks(prev => prev.filter(t => !selectedTaskIds.has(t.id)))
+    setSelectedTaskIds(new Set()); setBulkMode(false)
+  }
+
+  // ── Export CSV ────────────────────────────────────────────────────────────
+
+  function exportCSV() {
+    const headers = ['Title', 'Status', 'Priority', 'Assigned To', 'Due Date', 'Labels', 'Description', 'Created']
+    const rows = filteredTasks.map(t => [
+      `"${(t.title || '').replace(/"/g, '""')}"`,
+      t.status,
+      t.priority,
+      `"${t.assignee?.full_name || t.assignee?.email || ''}"`,
+      t.due_date || '',
+      `"${(t.labels || []).map(l => l.text).join(', ')}"`,
+      `"${(t.description || '').replace(/"/g, '""')}"`,
+      t.created_at ? format(new Date(t.created_at), 'yyyy-MM-dd') : '',
+    ])
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `${board.name.replace(/\s+/g, '_')}_tasks.csv`
+    a.click(); URL.revokeObjectURL(url)
+  }
+
+  // ── Duplicate board ────────────────────────────────────────────────────────
+
+  async function duplicateBoard(includeTasks = true) {
+    const { data, ok } = await apiFetch(`/api/boards/${boardId}/duplicate`, {
+      method: 'POST', body: { include_tasks: includeTasks },
+    })
+    if (ok) router.push(`/boards/${data.id}`)
+    return { ok, error: ok ? null : data.error }
+  }
+
+  // ── Inline edit ───────────────────────────────────────────────────────────
+
+  async function inlineEditSave(id) {
+    const t = editingTitle.trim()
+    if (t && t !== tasks.find(x => x.id === id)?.title) {
+      await updateTask(id, { title: t })
+    }
+    setEditingTaskId(null); setEditingTitle('')
   }
 
   // ── Members ───────────────────────────────────────────────────────────────
@@ -459,6 +569,21 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
             )}
           </div>
 
+          {/* Analytics */}
+          <button onClick={() => setShowAnalytics(true)} className="btn-ghost p-2" title="Board analytics">
+            <BarChart2 size={16} />
+          </button>
+
+          {/* Export CSV */}
+          <button onClick={exportCSV} className="btn-ghost p-2" title="Export to CSV">
+            <Download size={16} />
+          </button>
+
+          {/* Global search */}
+          <button onClick={() => setShowGlobalSearch(true)} className="btn-ghost p-2" title="Global search (⌘K)">
+            <Search size={16} />
+          </button>
+
           {userRole === 'owner' && (
             <button onClick={() => setShowSettings(true)} className="btn-ghost p-2">
               <Settings size={16} />
@@ -498,10 +623,32 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
             <X size={12} /> Clear
           </button>
         )}
+
+        {/* Swimlane toggle (kanban only) */}
+        {viewMode === 'kanban' && (
+          <button
+            onClick={() => setSwimlaneBy(s => s === 'none' ? 'assignee' : 'none')}
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg transition-all"
+            style={swimlaneBy !== 'none'
+              ? { background: 'rgba(41,82,255,0.15)', color: '#7ba3ff', border: '1px solid rgba(41,82,255,0.3)' }
+              : { background: 'rgba(255,255,255,0.04)', color: 'rgba(107,114,128,0.8)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <Layers size={12} /> Swimlanes
+          </button>
+        )}
+
+        {/* Bulk select toggle */}
+        <button
+          onClick={() => { setBulkMode(v => !v); setSelectedTaskIds(new Set()) }}
+          className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg transition-all ml-auto"
+          style={bulkMode
+            ? { background: 'rgba(41,82,255,0.15)', color: '#7ba3ff', border: '1px solid rgba(41,82,255,0.3)' }
+            : { background: 'rgba(255,255,255,0.04)', color: 'rgba(107,114,128,0.8)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <CheckSquare size={12} /> {bulkMode ? `${selectedTaskIds.size} selected` : 'Select'}
+        </button>
       </div>
 
       {/* View content */}
-      {viewMode === 'kanban' && (
+      {viewMode === 'kanban' && swimlaneBy === 'none' && (
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
           <div className="flex-1 overflow-x-auto">
             <div className="flex gap-5 p-6 h-full min-w-fit">
@@ -509,7 +656,13 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
                 <DroppableColumn key={col.id} column={col} tasks={tasksByStatus[col.id]}
                   members={members} canEdit={userRole !== 'viewer'}
                   onTaskClick={setActiveTask} onAddTask={() => setShowNewTask(col.id)}
-                  draggingTaskId={draggingTask?.id} />
+                  draggingTaskId={draggingTask?.id}
+                  wipLimit={wipLimits[col.id]}
+                  bulkMode={bulkMode} selectedTaskIds={selectedTaskIds} onToggleSelect={toggleSelectTask}
+                  editingTaskId={editingTaskId} editingTitle={editingTitle}
+                  onStartEdit={(t) => { setEditingTaskId(t.id); setEditingTitle(t.title) }}
+                  onSaveEdit={inlineEditSave}
+                  onEditTitleChange={setEditingTitle} />
               ))}
             </div>
           </div>
@@ -521,6 +674,13 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
             ) : null}
           </DragOverlay>
         </DndContext>
+      )}
+
+      {viewMode === 'kanban' && swimlaneBy === 'assignee' && (
+        <SwimlaneKanban tasks={filteredTasks} members={members} canEdit={userRole !== 'viewer'}
+          onTaskClick={setActiveTask} onAddTask={setShowNewTask} onMoveTask={moveTask}
+          wipLimits={wipLimits}
+          bulkMode={bulkMode} selectedTaskIds={selectedTaskIds} onToggleSelect={toggleSelectTask} />
       )}
 
       {viewMode === 'list' && (
@@ -557,7 +717,31 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
       {showSettings && (
         <BoardSettingsModal board={board} boardFields={boardFields}
           onClose={() => setShowSettings(false)} onUpdate={updateBoard} onDelete={deleteBoard}
-          onCreateField={createField} onUpdateField={updateField} onDeleteField={deleteField} />
+          onCreateField={createField} onUpdateField={updateField} onDeleteField={deleteField}
+          onDuplicate={duplicateBoard} />
+      )}
+
+      {showAnalytics && (
+        <AnalyticsModal tasks={tasks} members={members} onClose={() => setShowAnalytics(false)} />
+      )}
+
+      {showGlobalSearch && (
+        <GlobalSearchModal
+          onClose={() => setShowGlobalSearch(false)}
+          onOpenTask={(task) => { setActiveTask(task) }}
+          currentBoardId={boardId} />
+      )}
+
+      {/* Bulk action toolbar */}
+      {bulkMode && selectedTaskIds.size > 0 && (
+        <BulkActionToolbar
+          count={selectedTaskIds.size}
+          members={members}
+          onMove={bulkMove}
+          onAssign={bulkAssign}
+          onDelete={bulkDelete}
+          onClear={() => setSelectedTaskIds(new Set())}
+        />
       )}
     </div>
   )
@@ -565,13 +749,18 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
 
 // ── Droppable Column (Kanban) ──────────────────────────────────────────────────
 
-function DroppableColumn({ column, tasks, members, canEdit, onTaskClick, onAddTask, draggingTaskId }) {
+function DroppableColumn({ column, tasks, members, canEdit, onTaskClick, onAddTask, draggingTaskId,
+  wipLimit, bulkMode, selectedTaskIds, onToggleSelect, editingTaskId, editingTitle, onStartEdit, onSaveEdit, onEditTitleChange }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id })
+  const atWip  = wipLimit && tasks.length >= wipLimit
+  const overWip = wipLimit && tasks.length > wipLimit
+  const wipColor = overWip ? '#ef4444' : atWip ? '#f59e0b' : null
+
   return (
     <div ref={setNodeRef}
          className={`w-72 shrink-0 flex flex-col rounded-2xl transition-all duration-200 ${column.colClass}
            ${isOver ? 'ring-2 ring-brand-400 ring-offset-2 ring-offset-[#07070f] scale-[1.01]' : ''}`}
-         style={{ minHeight: '200px' }}>
+         style={{ minHeight: '200px', outline: wipColor ? `1px solid ${wipColor}40` : undefined }}>
       <div className={`flex items-center justify-between px-4 py-3 rounded-t-2xl bg-gradient-to-r ${column.headerGradient}`}
            style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
         <div className="flex items-center gap-2.5">
@@ -579,9 +768,12 @@ function DroppableColumn({ column, tasks, members, canEdit, onTaskClick, onAddTa
                style={{ backgroundColor: column.dotColor, boxShadow: `0 0 8px ${column.dotColor}80` }} />
           <span className="text-sm font-bold text-gray-100">{column.label}</span>
           <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full min-w-[20px] text-center"
-                style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(156,163,175,0.9)' }}>
-            {tasks.length}
+                style={wipColor
+                  ? { background: `${wipColor}20`, color: wipColor, border: `1px solid ${wipColor}40` }
+                  : { background: 'rgba(255,255,255,0.08)', color: 'rgba(156,163,175,0.9)' }}>
+            {tasks.length}{wipLimit ? `/${wipLimit}` : ''}
           </span>
+          {wipColor && <AlertTriangle size={11} style={{ color: wipColor }} />}
         </div>
         {canEdit && (
           <button onClick={onAddTask} className="w-6 h-6 rounded-md flex items-center justify-center transition-all"
@@ -595,7 +787,10 @@ function DroppableColumn({ column, tasks, members, canEdit, onTaskClick, onAddTa
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
         {tasks.map(task => (
           <DraggableTaskCard key={task.id} task={task} onClick={() => onTaskClick(task)}
-            isDragging={task.id === draggingTaskId} columnColor={column.dotColor} />
+            isDragging={task.id === draggingTaskId} columnColor={column.dotColor}
+            bulkMode={bulkMode} selected={selectedTaskIds?.has(task.id)} onToggleSelect={onToggleSelect}
+            isEditing={editingTaskId === task.id} editingTitle={editingTitle}
+            onStartEdit={onStartEdit} onSaveEdit={onSaveEdit} onEditTitleChange={onEditTitleChange} />
         ))}
         {canEdit && (
           <button onClick={onAddTask}
@@ -613,41 +808,84 @@ function DroppableColumn({ column, tasks, members, canEdit, onTaskClick, onAddTa
 
 // ── Draggable Task Card (Kanban) ───────────────────────────────────────────────
 
-function DraggableTaskCard({ task, onClick, isDragging, columnColor }) {
+function DraggableTaskCard({ task, onClick, isDragging, columnColor,
+  bulkMode, selected, onToggleSelect, isEditing, editingTitle, onStartEdit, onSaveEdit, onEditTitleChange }) {
   const { attributes, listeners, setNodeRef, transform } = useDraggable({ id: task.id })
   const badge = PRIORITY_BADGE[task.priority] || PRIORITY_BADGE.low
   const isOverdue = task.due_date && new Date(task.due_date) < new Date() && task.status !== 'done'
   const transformStyle = transform ? { transform: CSS.Translate.toString(transform) } : {}
+
+  function handleClick(e) {
+    if (bulkMode) { e.stopPropagation(); onToggleSelect(task.id); return }
+    onClick()
+  }
 
   return (
     <div ref={setNodeRef}
          className={`rounded-xl p-3.5 transition-all duration-150 group space-y-2.5 relative cursor-pointer ${isDragging ? 'opacity-40' : ''}`}
          style={{
            ...transformStyle,
-           background: 'rgba(14,14,26,0.8)',
-           border: '1px solid rgba(255,255,255,0.07)',
-           borderLeft: `3px solid ${columnColor}40`,
+           background: selected ? 'rgba(41,82,255,0.12)' : 'rgba(14,14,26,0.8)',
+           border: selected ? '1px solid rgba(41,82,255,0.4)' : '1px solid rgba(255,255,255,0.07)',
+           borderLeft: `3px solid ${selected ? '#2952ff' : columnColor + '40'}`,
            borderRadius: '12px',
          }}
          onMouseEnter={e => {
-           if (!isDragging) {
+           if (!isDragging && !selected) {
              e.currentTarget.style.borderLeftColor = columnColor
              e.currentTarget.style.boxShadow = `0 0 0 1px rgba(255,255,255,0.1), 0 4px 16px rgba(0,0,0,0.4), 0 0 12px ${columnColor}20`
              e.currentTarget.style.transform = (transformStyle.transform || '') + ' translateY(-1px)'
            }
          }}
          onMouseLeave={e => {
-           e.currentTarget.style.borderLeftColor = `${columnColor}40`
-           e.currentTarget.style.boxShadow = ''
+           if (!selected) {
+             e.currentTarget.style.borderLeftColor = `${columnColor}40`
+             e.currentTarget.style.boxShadow = ''
+           }
            e.currentTarget.style.transform = transformStyle.transform || ''
          }}
-         onClick={onClick}>
-      <div {...attributes} {...listeners} onClick={e => e.stopPropagation()}
-           className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing p-0.5 rounded"
-           style={{ color: 'rgba(100,116,139,0.7)' }}>
-        <GripVertical size={13} />
-      </div>
-      <p className="text-sm text-gray-200 font-semibold leading-snug pr-5 group-hover:text-white transition-colors">{task.title}</p>
+         onClick={handleClick}>
+
+      {/* Bulk checkbox or drag handle */}
+      {bulkMode ? (
+        <div className="absolute top-3 right-3" onClick={e => { e.stopPropagation(); onToggleSelect(task.id) }}>
+          <div className="w-4 h-4 rounded flex items-center justify-center transition-all"
+               style={selected
+                 ? { background: '#2952ff', border: '1px solid #2952ff' }
+                 : { background: 'transparent', border: '1px solid rgba(107,114,128,0.4)' }}>
+            {selected && <Check size={10} className="text-white" />}
+          </div>
+        </div>
+      ) : (
+        <div {...attributes} {...listeners} onClick={e => e.stopPropagation()}
+             className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing p-0.5 rounded"
+             style={{ color: 'rgba(100,116,139,0.7)' }}>
+          <GripVertical size={13} />
+        </div>
+      )}
+
+      {/* Title — double-click to inline edit */}
+      {isEditing ? (
+        <input
+          className="text-sm text-gray-200 font-semibold w-full bg-gray-800 border border-brand-500/50 rounded px-1.5 py-0.5 outline-none pr-5"
+          value={editingTitle}
+          autoFocus
+          onChange={e => onEditTitleChange(e.target.value)}
+          onClick={e => e.stopPropagation()}
+          onBlur={() => onSaveEdit(task.id)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); onSaveEdit(task.id) }
+            if (e.key === 'Escape') { onEditTitleChange(''); onSaveEdit(task.id) }
+          }}
+        />
+      ) : (
+        <p
+          className="text-sm text-gray-200 font-semibold leading-snug pr-5 group-hover:text-white transition-colors"
+          onDoubleClick={e => { e.stopPropagation(); onStartEdit(task) }}>
+          {task.title}
+        </p>
+      )}
+
       {task.description && (
         <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{task.description}</p>
       )}
@@ -1140,6 +1378,9 @@ function TaskDetailModal({ task, boardId, members, boardFields, currentUser, can
   const [comments, setComments]         = useState([])
   const [loadingComments, setLoadingComments] = useState(true)
   const [addingComment, setAddingComment]     = useState(false)
+  const [bottomTab, setBottomTab]             = useState('comments') // 'comments' | 'activity'
+  const [activityLog, setActivityLog]         = useState([])
+  const [loadingActivity, setLoadingActivity] = useState(false)
   const commentsEndRef = useRef(null)
 
   useEffect(() => {
@@ -1151,6 +1392,17 @@ function TaskDetailModal({ task, boardId, members, boardFields, currentUser, can
     }
     load()
   }, [task.id])
+
+  useEffect(() => {
+    if (bottomTab !== 'activity') return
+    async function loadActivity() {
+      setLoadingActivity(true)
+      const { data, ok } = await apiFetch(`/api/tasks/${task.id}/activity`)
+      if (ok) setActivityLog(data || [])
+      setLoadingActivity(false)
+    }
+    loadActivity()
+  }, [task.id, bottomTab])
 
   useEffect(() => {
     if (!loadingComments) commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -1369,44 +1621,93 @@ function TaskDetailModal({ task, boardId, members, boardFields, currentUser, can
             )}
           </div>
 
-          {/* Comments */}
+          {/* Comments / Activity tabs */}
           <div>
-            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-1.5">
-              <MessageSquare size={14} /> Comments ({comments.length})
-            </h3>
-            {loadingComments ? (
-              <div className="text-xs text-gray-600 py-4 text-center">Loading comments…</div>
-            ) : (
-              <div className="space-y-3 mb-4">
-                {comments.map(c => (
-                  <div key={c.id} className="flex gap-3">
-                    <div className="w-7 h-7 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-300 shrink-0 mt-0.5">
-                      {(c.author?.full_name || c.author?.email || '?')[0].toUpperCase()}
-                    </div>
-                    <div className="bg-gray-800 rounded-xl px-4 py-2.5 flex-1">
-                      <p className="text-xs font-medium text-gray-400 mb-1">
-                        {c.author?.full_name || c.author?.email}
-                        <span className="text-gray-600 font-normal ml-2">{format(new Date(c.created_at), 'MMM d, h:mm a')}</span>
-                      </p>
-                      <p className="text-sm text-gray-200 leading-relaxed">{c.content}</p>
-                    </div>
+            <div className="flex items-center gap-0 mb-4 border-b border-gray-800">
+              {[
+                { id: 'comments', label: `Comments (${comments.length})`, icon: MessageSquare },
+                { id: 'activity', label: 'Activity', icon: Activity },
+              ].map(({ id, label, icon: Icon }) => (
+                <button key={id} onClick={() => setBottomTab(id)}
+                        className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors relative"
+                        style={bottomTab === id ? { color: '#7ba3ff' } : { color: 'rgba(107,114,128,0.8)' }}>
+                  <Icon size={13} />{label}
+                  {bottomTab === id && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-500 rounded-t" />}
+                </button>
+              ))}
+            </div>
+
+            {bottomTab === 'comments' && (
+              <>
+                {loadingComments ? (
+                  <div className="text-xs text-gray-600 py-4 text-center">Loading comments…</div>
+                ) : (
+                  <div className="space-y-3 mb-4">
+                    {comments.length === 0 && (
+                      <p className="text-xs text-gray-600 text-center py-4">No comments yet</p>
+                    )}
+                    {comments.map(c => (
+                      <div key={c.id} className="flex gap-3">
+                        <div className="w-7 h-7 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-300 shrink-0 mt-0.5">
+                          {(c.author?.full_name || c.author?.email || '?')[0].toUpperCase()}
+                        </div>
+                        <div className="bg-gray-800 rounded-xl px-4 py-2.5 flex-1">
+                          <p className="text-xs font-medium text-gray-400 mb-1">
+                            {c.author?.full_name || c.author?.email}
+                            <span className="text-gray-600 font-normal ml-2">{format(new Date(c.created_at), 'MMM d, h:mm a')}</span>
+                          </p>
+                          <p className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">{c.content}</p>
+                        </div>
+                      </div>
+                    ))}
+                    <div ref={commentsEndRef} />
                   </div>
-                ))}
-                <div ref={commentsEndRef} />
+                )}
+                <form onSubmit={handleAddComment} className="flex gap-3">
+                  <div className="w-7 h-7 rounded-full bg-brand-700 flex items-center justify-center text-xs font-bold text-white shrink-0 mt-1">
+                    {(currentUser.full_name || currentUser.email || '?')[0].toUpperCase()}
+                  </div>
+                  <div className="flex-1 flex gap-2">
+                    <input className="input flex-1" placeholder="Write a comment… (@mention teammates)"
+                           value={comment} onChange={e => setComment(e.target.value)} />
+                    <button type="submit" className="btn-primary px-3" disabled={!comment.trim() || addingComment}>
+                      {addingComment ? '…' : 'Send'}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
+
+            {bottomTab === 'activity' && (
+              <div className="space-y-1">
+                {loadingActivity ? (
+                  <div className="text-xs text-gray-600 py-4 text-center">Loading activity…</div>
+                ) : activityLog.length === 0 ? (
+                  <p className="text-xs text-gray-600 text-center py-4">No activity recorded yet</p>
+                ) : (
+                  activityLog.map(entry => (
+                    <div key={entry.id} className="flex items-start gap-3 py-2 border-b border-gray-800/40 last:border-0">
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0 mt-0.5"
+                           style={{ background: 'linear-gradient(135deg,#2952ff,#8b5cf6)' }}>
+                        {(entry.actor?.full_name || entry.actor?.email || '?')[0].toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-medium text-gray-300">{entry.actor?.full_name || entry.actor?.email}</span>
+                        <span className="text-xs text-gray-500 ml-1.5">
+                          {entry.action === 'created' && 'created this task'}
+                          {entry.action === 'moved' && `moved to ${entry.new_value}`}
+                          {entry.action === 'assigned' && (entry.new_value ? `assigned to ${entry.new_value}` : 'unassigned')}
+                          {entry.action === 'updated' && `updated ${entry.field}: ${entry.old_value} → ${entry.new_value}`}
+                          {entry.action === 'commented' && 'added a comment'}
+                        </span>
+                        <p className="text-[10px] text-gray-600 mt-0.5">{format(new Date(entry.created_at), 'MMM d, h:mm a')}</p>
+                      </div>
+                      <ActivityIcon action={entry.action} />
+                    </div>
+                  ))
+                )}
               </div>
             )}
-            <form onSubmit={handleAddComment} className="flex gap-3">
-              <div className="w-7 h-7 rounded-full bg-brand-700 flex items-center justify-center text-xs font-bold text-white shrink-0 mt-1">
-                {(currentUser.full_name || currentUser.email || '?')[0].toUpperCase()}
-              </div>
-              <div className="flex-1 flex gap-2">
-                <input className="input flex-1" placeholder="Write a comment…"
-                       value={comment} onChange={e => setComment(e.target.value)} />
-                <button type="submit" className="btn-primary px-3" disabled={!comment.trim() || addingComment}>
-                  {addingComment ? '…' : 'Send'}
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       </div>
@@ -1447,7 +1748,7 @@ function NotificationDropdown({ notifications, onMarkRead, onMarkAllRead }) {
 
 // ── Board Settings Modal (tabs: General | Fields) ──────────────────────────────
 
-function BoardSettingsModal({ board, boardFields, onClose, onUpdate, onDelete, onCreateField, onUpdateField, onDeleteField }) {
+function BoardSettingsModal({ board, boardFields, onClose, onUpdate, onDelete, onCreateField, onUpdateField, onDeleteField, onDuplicate }) {
   const [tab, setTab]           = useState('general')
   const [name, setName]         = useState(board.name)
   const [description, setDescription] = useState(board.description || '')
@@ -1456,6 +1757,10 @@ function BoardSettingsModal({ board, boardFields, onClose, onUpdate, onDelete, o
   const [deleting, setDeleting] = useState(false)
   const [error, setError]       = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [duplicating, setDuplicating] = useState(false)
+  // WIP limits state
+  const [wipLimits, setWipLimits] = useState(board.settings?.wip_limits || {})
+  const [savingWip, setSavingWip] = useState(false)
 
   // Add field state
   const [showAddField, setShowAddField]     = useState(false)
@@ -1521,7 +1826,11 @@ function BoardSettingsModal({ board, boardFields, onClose, onUpdate, onDelete, o
 
         {/* Tabs */}
         <div className="flex border-b border-gray-800 shrink-0">
-          {[{ id: 'general', label: 'General' }, { id: 'fields', label: `Fields (${boardFields.length})` }].map(t => (
+          {[
+            { id: 'general', label: 'General' },
+            { id: 'fields', label: `Fields (${boardFields.length})` },
+            { id: 'wip', label: 'WIP Limits' },
+          ].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
                     className="px-5 py-2.5 text-sm font-medium transition-colors relative"
                     style={tab === t.id ? { color: '#7ba3ff' } : { color: 'rgba(107,114,128,0.8)' }}>
@@ -1564,6 +1873,27 @@ function BoardSettingsModal({ board, boardFields, onClose, onUpdate, onDelete, o
                 </div>
               </form>
 
+              {/* Duplicate board */}
+              <div className="mt-6 pt-5 border-t border-gray-800">
+                <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-3">Duplicate Board</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => { setDuplicating(true); await onDuplicate(true); setDuplicating(false) }}
+                    disabled={duplicating}
+                    className="flex-1 flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-lg transition-colors"
+                    style={{ background: 'rgba(41,82,255,0.08)', color: '#7ba3ff', border: '1px solid rgba(41,82,255,0.2)' }}>
+                    <Copy size={13} /> {duplicating ? 'Cloning…' : 'Clone with tasks'}
+                  </button>
+                  <button
+                    onClick={async () => { setDuplicating(true); await onDuplicate(false); setDuplicating(false) }}
+                    disabled={duplicating}
+                    className="flex-1 flex items-center justify-center gap-1.5 text-sm px-3 py-2 rounded-lg transition-colors"
+                    style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(107,114,128,0.8)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <Copy size={13} /> Empty copy
+                  </button>
+                </div>
+              </div>
+
               {/* Danger zone */}
               <div className="mt-6 pt-5 border-t border-gray-800">
                 <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-3">Danger Zone</p>
@@ -1589,6 +1919,51 @@ function BoardSettingsModal({ board, boardFields, onClose, onUpdate, onDelete, o
                 )}
               </div>
             </>
+          )}
+
+          {tab === 'wip' && (
+            <div className="space-y-5">
+              <p className="text-xs text-gray-500 leading-relaxed">
+                WIP (Work In Progress) limits cap how many tasks can be in a column. Columns near the limit turn amber; over-limit columns turn red.
+              </p>
+              {COLUMNS.map(col => (
+                <div key={col.id} className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 w-36 shrink-0">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: col.dotColor }} />
+                    <span className="text-sm text-gray-300 font-medium">{col.label}</span>
+                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    placeholder="No limit"
+                    className="input w-28 py-1.5 text-sm"
+                    value={wipLimits[col.id] || ''}
+                    onChange={e => setWipLimits(prev => ({
+                      ...prev,
+                      [col.id]: e.target.value ? Number(e.target.value) : undefined,
+                    }))}
+                  />
+                  {wipLimits[col.id] && (
+                    <button onClick={() => setWipLimits(prev => { const n = { ...prev }; delete n[col.id]; return n })}
+                            className="text-xs text-gray-600 hover:text-gray-400 transition-colors">
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                onClick={async () => {
+                  setSavingWip(true)
+                  const clean = Object.fromEntries(Object.entries(wipLimits).filter(([, v]) => v))
+                  await onUpdate({ settings: { ...(board.settings || {}), wip_limits: clean } })
+                  setSavingWip(false)
+                }}
+                disabled={savingWip}
+                className="btn-primary w-full">
+                {savingWip ? 'Saving…' : 'Save WIP limits'}
+              </button>
+            </div>
           )}
 
           {tab === 'fields' && (
@@ -1711,6 +2086,165 @@ function BoardSettingsModal({ board, boardFields, onClose, onUpdate, onDelete, o
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Activity Icon helper ───────────────────────────────────────────────────────
+
+function ActivityIcon({ action }) {
+  const map = {
+    created:   { icon: Plus, color: '#10b981' },
+    moved:     { icon: ArrowUpDown, color: '#2952ff' },
+    assigned:  { icon: User, color: '#8b5cf6' },
+    updated:   { icon: Edit2, color: '#f59e0b' },
+    commented: { icon: MessageSquare, color: '#06b6d4' },
+  }
+  const { icon: Icon, color } = map[action] || { icon: Activity, color: '#64748b' }
+  return (
+    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0"
+         style={{ background: `${color}20`, color }}>
+      <Icon size={9} />
+    </div>
+  )
+}
+
+// ── Bulk Action Toolbar ────────────────────────────────────────────────────────
+
+function BulkActionToolbar({ count, members, onMove, onAssign, onDelete, onClear }) {
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl"
+         style={{ background: 'rgba(7,7,15,0.95)', border: '1px solid rgba(41,82,255,0.3)', backdropFilter: 'blur(16px)' }}>
+      <span className="text-sm font-semibold text-brand-400">{count} selected</span>
+      <div className="w-px h-5 bg-gray-700" />
+
+      {/* Move to */}
+      <div className="flex items-center gap-1">
+        {COLUMNS.map(col => (
+          <button key={col.id} onClick={() => onMove(col.id)}
+                  className="text-xs px-2.5 py-1.5 rounded-lg transition-all font-medium"
+                  style={{ background: `${col.dotColor}18`, color: col.dotColor, border: `1px solid ${col.dotColor}30` }}
+                  title={`Move to ${col.label}`}>
+            → {col.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="w-px h-5 bg-gray-700" />
+
+      {/* Assign */}
+      <select className="input py-1 text-xs h-7 w-28"
+              onChange={e => onAssign(e.target.value)}
+              defaultValue="">
+        <option value="" disabled>Assign to…</option>
+        <option value="">Unassign</option>
+        {members.map(m => <option key={m.id} value={m.id}>{m.full_name || m.email}</option>)}
+      </select>
+
+      <div className="w-px h-5 bg-gray-700" />
+
+      {/* Delete */}
+      <button onClick={onDelete}
+              className="text-xs px-2.5 py-1.5 rounded-lg text-red-400 transition-all"
+              style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
+        <Trash2 size={12} className="inline mr-1" />Delete
+      </button>
+
+      <button onClick={onClear} className="text-gray-500 hover:text-gray-300 transition-colors ml-1">
+        <X size={14} />
+      </button>
+    </div>
+  )
+}
+
+// ── Swimlane Kanban (group by assignee) ────────────────────────────────────────
+
+function SwimlaneKanban({ tasks, members, canEdit, onTaskClick, onAddTask, onMoveTask, wipLimits, bulkMode, selectedTaskIds, onToggleSelect }) {
+  // Build lanes: one per assignee + unassigned
+  const lanes = useMemo(() => {
+    const laneMap = { unassigned: { id: 'unassigned', label: 'Unassigned', tasks: [] } }
+    members.forEach(m => { laneMap[m.id] = { id: m.id, label: m.full_name || m.email, avatar: m, tasks: [] } })
+    tasks.forEach(t => {
+      const key = t.assigned_to || 'unassigned'
+      if (laneMap[key]) laneMap[key].tasks.push(t)
+      else laneMap['unassigned'].tasks.push(t)
+    })
+    return Object.values(laneMap).filter(l => l.tasks.length > 0 || l.id === 'unassigned')
+  }, [tasks, members])
+
+  const statusColors = { todo: '#64748b', in_progress: '#2952ff', done: '#10b981' }
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      {lanes.map(lane => {
+        const byStatus = { todo: [], in_progress: [], done: [] }
+        lane.tasks.forEach(t => { if (byStatus[t.status]) byStatus[t.status].push(t) })
+
+        return (
+          <div key={lane.id} className="rounded-2xl overflow-hidden"
+               style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+            {/* Lane header */}
+            <div className="flex items-center gap-3 px-5 py-3"
+                 style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+              <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white shrink-0"
+                   style={{ background: lane.id === 'unassigned' ? 'rgba(100,116,139,0.3)' : 'linear-gradient(135deg,#2952ff,#8b5cf6)' }}>
+                {lane.id === 'unassigned' ? <User size={13} /> : lane.label[0].toUpperCase()}
+              </div>
+              <span className="text-sm font-semibold text-gray-200">{lane.label}</span>
+              <span className="text-xs text-gray-500">{lane.tasks.length} task{lane.tasks.length !== 1 ? 's' : ''}</span>
+            </div>
+
+            {/* Columns */}
+            <div className="flex gap-0">
+              {COLUMNS.map((col, i) => (
+                <div key={col.id} className="flex-1 p-3 space-y-2"
+                     style={{ borderRight: i < COLUMNS.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+                  <p className="text-[11px] font-semibold uppercase tracking-widest mb-2 flex items-center gap-1.5"
+                     style={{ color: col.dotColor }}>
+                    <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: col.dotColor }} />
+                    {col.label} <span className="font-normal text-gray-600">{byStatus[col.id].length}</span>
+                  </p>
+                  {byStatus[col.id].map(task => (
+                    <div key={task.id}
+                         onClick={() => bulkMode ? onToggleSelect(task.id) : onTaskClick(task)}
+                         className="rounded-lg px-3 py-2.5 cursor-pointer transition-all group"
+                         style={{
+                           background: selectedTaskIds?.has(task.id) ? 'rgba(41,82,255,0.12)' : 'rgba(14,14,26,0.6)',
+                           border: selectedTaskIds?.has(task.id) ? '1px solid rgba(41,82,255,0.4)' : '1px solid rgba(255,255,255,0.06)',
+                         }}
+                         onMouseEnter={e => { if (!selectedTaskIds?.has(task.id)) e.currentTarget.style.background = 'rgba(41,82,255,0.05)' }}
+                         onMouseLeave={e => { if (!selectedTaskIds?.has(task.id)) e.currentTarget.style.background = 'rgba(14,14,26,0.6)' }}>
+                      <p className={`text-xs font-medium leading-snug ${task.status === 'done' ? 'line-through text-gray-500' : 'text-gray-200'}`}>
+                        {task.title}
+                      </p>
+                      {task.due_date && (
+                        <p className="text-[10px] text-gray-600 mt-1 flex items-center gap-0.5">
+                          <Calendar size={8} />{format(new Date(task.due_date), 'MMM d')}
+                        </p>
+                      )}
+                      {/* Quick move buttons */}
+                      {canEdit && (
+                        <div className="flex gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {COLUMNS.filter(c => c.id !== col.id).map(c => (
+                            <button key={c.id} onClick={e => { e.stopPropagation(); onMoveTask(task.id, c.id) }}
+                                    className="text-[9px] px-1.5 py-0.5 rounded font-semibold transition-colors"
+                                    style={{ background: `${c.dotColor}15`, color: c.dotColor }}>
+                              → {c.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {byStatus[col.id].length === 0 && (
+                    <p className="text-[11px] text-gray-700 text-center py-2">—</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

@@ -18,6 +18,17 @@ async function getBoardAccess(boardId) {
   return { user, role: membership.role, admin }
 }
 
+async function logActivity(admin, { taskId, boardId, userId, action, field, oldValue, newValue }) {
+  try {
+    await admin.from('task_activity').insert({
+      task_id: taskId, board_id: boardId, user_id: userId,
+      action, field: field || null,
+      old_value: oldValue != null ? String(oldValue) : null,
+      new_value: newValue != null ? String(newValue) : null,
+    })
+  } catch (_) { /* non-fatal */ }
+}
+
 // PATCH /api/boards/[boardId]/tasks/[taskId]
 export async function PATCH(request, { params }) {
   const access = await getBoardAccess(params.boardId)
@@ -26,11 +37,22 @@ export async function PATCH(request, { params }) {
 
   const updates = await request.json()
 
+  // Fetch current task to diff
+  const { data: oldTask } = await access.admin
+    .from('tasks')
+    .select('status, assigned_to, priority, title')
+    .eq('id', params.taskId)
+    .single()
+
   // Strip protected fields
-  delete updates.id
-  delete updates.board_id
-  delete updates.created_by
-  delete updates.created_at
+  delete updates.id; delete updates.board_id; delete updates.created_by; delete updates.created_at
+
+  // Set completed_at when moving to done
+  if (updates.status === 'done' && oldTask?.status !== 'done') {
+    updates.completed_at = new Date().toISOString()
+  } else if (updates.status && updates.status !== 'done' && oldTask?.status === 'done') {
+    updates.completed_at = null // un-completing
+  }
 
   const { data, error } = await access.admin
     .from('tasks')
@@ -41,6 +63,24 @@ export async function PATCH(request, { params }) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+  // Log meaningful changes
+  if (oldTask) {
+    const base = { taskId: params.taskId, boardId: params.boardId, userId: access.user.id }
+    if (updates.status && updates.status !== oldTask.status) {
+      await logActivity(access.admin, { ...base, action: 'moved', field: 'status', oldValue: oldTask.status, newValue: updates.status })
+    }
+    if ('assigned_to' in updates && updates.assigned_to !== oldTask.assigned_to) {
+      await logActivity(access.admin, { ...base, action: 'assigned', field: 'assigned_to', oldValue: oldTask.assigned_to, newValue: updates.assigned_to })
+    }
+    if (updates.priority && updates.priority !== oldTask.priority) {
+      await logActivity(access.admin, { ...base, action: 'updated', field: 'priority', oldValue: oldTask.priority, newValue: updates.priority })
+    }
+    if (updates.title && updates.title !== oldTask.title) {
+      await logActivity(access.admin, { ...base, action: 'updated', field: 'title', oldValue: oldTask.title, newValue: updates.title })
+    }
+  }
+
   return NextResponse.json(data)
 }
 

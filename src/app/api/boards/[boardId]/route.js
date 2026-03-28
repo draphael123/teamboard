@@ -25,11 +25,12 @@ export async function PATCH(request, { params }) {
   const access = await getBoardAccess(params.boardId, 'owner')
   if (!access) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { name, description, color } = await request.json()
+  const { name, description, color, settings } = await request.json()
   const updates = {}
   if (name !== undefined) updates.name = name.trim()
   if (description !== undefined) updates.description = description?.trim() || null
   if (color !== undefined) updates.color = color
+  if (settings !== undefined) updates.settings = settings
 
   const { data, error } = await access.admin
     .from('boards')
