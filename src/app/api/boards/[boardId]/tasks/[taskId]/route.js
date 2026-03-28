@@ -40,7 +40,7 @@ export async function PATCH(request, { params }) {
   // Fetch current task to diff
   const { data: oldTask } = await access.admin
     .from('tasks')
-    .select('status, assigned_to, priority, title')
+    .select('status, assigned_to, priority, title, recur_rule, due_date, blocked_by')
     .eq('id', params.taskId)
     .single()
 
@@ -64,6 +64,25 @@ export async function PATCH(request, { params }) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
+  // Recurring task: when moved to done, clone and reset for next occurrence
+  if (updates.status === 'done' && oldTask?.status !== 'done' && oldTask?.recur_rule) {
+    const nextDue = computeNextDue(oldTask.due_date, oldTask.recur_rule)
+    await access.admin.from('tasks').insert({
+      board_id: params.boardId,
+      created_by: access.user.id,
+      title: data.title,
+      description: data.description,
+      priority: data.priority,
+      assigned_to: data.assigned_to,
+      labels: data.labels,
+      subtasks: (data.subtasks || []).map(s => ({ ...s, completed: false })),
+      custom_values: data.custom_values,
+      recur_rule: oldTask.recur_rule,
+      due_date: nextDue,
+      status: 'todo',
+    }).catch(() => {})
+  }
+
   // Log meaningful changes
   if (oldTask) {
     const base = { taskId: params.taskId, boardId: params.boardId, userId: access.user.id }
@@ -82,6 +101,14 @@ export async function PATCH(request, { params }) {
   }
 
   return NextResponse.json(data)
+}
+
+function computeNextDue(currentDue, rule) {
+  const base = currentDue ? new Date(currentDue) : new Date()
+  if (rule === 'daily')   base.setDate(base.getDate() + 1)
+  else if (rule === 'weekly')  base.setDate(base.getDate() + 7)
+  else if (rule === 'monthly') base.setMonth(base.getMonth() + 1)
+  return base.toISOString().slice(0, 10)
 }
 
 // DELETE /api/boards/[boardId]/tasks/[taskId]

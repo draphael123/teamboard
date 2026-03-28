@@ -11,10 +11,27 @@ import {
   Sliders, Edit2, GripHorizontal, ArrowUpDown,
   ExternalLink, ChevronRight, ChevronLeft,
   BarChart2, Download, Layers, Copy, Users, Activity,
-  Clock, AlertTriangle,
+  Clock, AlertTriangle, Lock, Repeat, Github, Paperclip,
+  Upload, FileText, Eye, EyeOff, Mail, Globe,
 } from 'lucide-react'
 import AnalyticsModal from './AnalyticsModal'
 import GlobalSearchModal from './GlobalSearchModal'
+
+// ── Simple markdown renderer ───────────────────────────────────────────────────
+function renderMarkdown(text) {
+  if (!text) return ''
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:4px;font-family:monospace;font-size:0.85em">$1</code>')
+    .replace(/^### (.+)$/gm, '<h3 style="font-size:0.9rem;font-weight:600;color:#d1d5db;margin:8px 0 4px">$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2 style="font-size:1rem;font-weight:600;color:#e5e7eb;margin:10px 0 4px">$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1 style="font-size:1.1rem;font-weight:700;color:#f3f4f6;margin:12px 0 4px">$1</h1>')
+    .replace(/^- (.+)$/gm, '<li style="margin:2px 0 2px 16px;list-style:disc">$1</li>')
+    .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:#7ba3ff;text-decoration:underline">$1</a>')
+    .replace(/\n/g, '<br/>')
+}
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   useDroppable, useDraggable,
@@ -708,6 +725,7 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
       {activeTask && (
         <TaskDetailModal task={activeTask} boardId={boardId} members={members}
           boardFields={boardFields} currentUser={currentUser} canEdit={userRole !== 'viewer'}
+          tasks={tasks}
           onClose={() => setActiveTask(null)} onUpdate={updateTask}
           onDelete={deleteTask} onMove={moveTask} />
       )}
@@ -911,6 +929,21 @@ function DraggableTaskCard({ task, onClick, isDragging, columnColor,
           {task.subtasks?.length > 0 && (
             <span className="text-[10px] font-medium text-gray-600 flex items-center gap-0.5">
               <CheckSquare size={9} />{task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
+            </span>
+          )}
+          {task.blocked_by?.length > 0 && (
+            <span className="text-[10px] font-medium flex items-center gap-0.5" style={{ color: '#f59e0b' }}>
+              <Lock size={9} />Blocked
+            </span>
+          )}
+          {task.recur_rule && (
+            <span className="text-[10px] font-medium text-gray-600 flex items-center gap-0.5">
+              <Repeat size={9} />{task.recur_rule}
+            </span>
+          )}
+          {(task.attachments_count > 0 || task._att_count > 0) && (
+            <span className="text-[10px] text-gray-600 flex items-center gap-0.5">
+              <Paperclip size={9} />
             </span>
           )}
         </div>
@@ -1362,7 +1395,7 @@ function NewTaskModal({ status, members, onClose, onCreate }) {
 
 // ── Task Detail Modal ──────────────────────────────────────────────────────────
 
-function TaskDetailModal({ task, boardId, members, boardFields, currentUser, canEdit, onClose, onUpdate, onDelete, onMove }) {
+function TaskDetailModal({ task, boardId, members, boardFields, currentUser, canEdit, tasks, onClose, onUpdate, onDelete, onMove }) {
   const [title, setTitle]               = useState(task.title)
   const [description, setDescription]   = useState(task.description || '')
   const [priority, setPriority]         = useState(task.priority)
@@ -1382,6 +1415,17 @@ function TaskDetailModal({ task, boardId, members, boardFields, currentUser, can
   const [activityLog, setActivityLog]         = useState([])
   const [loadingActivity, setLoadingActivity] = useState(false)
   const commentsEndRef = useRef(null)
+
+  // New feature state
+  const [blockedBy, setBlockedBy]             = useState(task.blocked_by || [])
+  const [recurRule, setRecurRule]             = useState(task.recur_rule || '')
+  const [githubPrUrl, setGithubPrUrl]         = useState(task.github_pr_url || '')
+  const [prStatus, setPrStatus]               = useState(null) // { state, html_url, title }
+  const [descEditMode, setDescEditMode]       = useState(false)
+  const [attachments, setAttachments]         = useState([])
+  const [loadingAtt, setLoadingAtt]           = useState(true)
+  const [uploadingAtt, setUploadingAtt]       = useState(false)
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
     async function load() {
@@ -1404,6 +1448,31 @@ function TaskDetailModal({ task, boardId, members, boardFields, currentUser, can
     loadActivity()
   }, [task.id, bottomTab])
 
+  // Load attachments
+  useEffect(() => {
+    async function loadAtt() {
+      setLoadingAtt(true)
+      const { data, ok } = await apiFetch(`/api/boards/${boardId}/tasks/${task.id}/attachments`)
+      if (ok) setAttachments(data || [])
+      setLoadingAtt(false)
+    }
+    loadAtt()
+  }, [task.id, boardId])
+
+  // Fetch GitHub PR status when URL is set
+  useEffect(() => {
+    if (!githubPrUrl) { setPrStatus(null); return }
+    const match = githubPrUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/)
+    if (!match) return
+    const [, owner, repo, num] = match
+    fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${num}`, {
+      headers: process.env.NEXT_PUBLIC_GITHUB_TOKEN ? { Authorization: `token ${process.env.NEXT_PUBLIC_GITHUB_TOKEN}` } : {},
+    })
+      .then(r => r.json())
+      .then(d => { if (d.state) setPrStatus({ state: d.state, title: d.title, html_url: d.html_url, merged: d.merged }) })
+      .catch(() => {})
+  }, [githubPrUrl])
+
   useEffect(() => {
     if (!loadingComments) commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [comments.length, loadingComments])
@@ -1415,8 +1484,33 @@ function TaskDetailModal({ task, boardId, members, boardFields, currentUser, can
       assigned_to: assignedTo || null,
       due_date: dueDate || null,
       status, labels, custom_values: customValues,
+      blocked_by: blockedBy,
+      recur_rule: recurRule || null,
+      github_pr_url: githubPrUrl || null,
     })
     setSaving(false)
+  }
+
+  async function handleUploadFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingAtt(true)
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`/api/boards/${boardId}/tasks/${task.id}/attachments`, { method: 'POST', body: form })
+    const data = await res.json()
+    if (res.ok) setAttachments(prev => [...prev, data])
+    setUploadingAtt(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  async function deleteAttachment(attId) {
+    await apiFetch(`/api/attachments/${attId}`, { method: 'DELETE' })
+    setAttachments(prev => prev.filter(a => a.id !== attId))
+  }
+
+  function toggleBlockedBy(taskId) {
+    setBlockedBy(prev => prev.includes(taskId) ? prev.filter(id => id !== taskId) : [...prev, taskId])
   }
 
   function toggleLabel(labelOption) {
@@ -1537,11 +1631,137 @@ function TaskDetailModal({ task, boardId, members, boardFields, currentUser, can
             </div>
           )}
 
-          {/* Description */}
+          {/* Description — markdown toggle */}
           <div>
-            <label className="label">Description</label>
-            <textarea className="input resize-none h-28" placeholder="Add more details…"
-                      value={description} onChange={e => setDescription(e.target.value)} disabled={!canEdit} />
+            <div className="flex items-center justify-between mb-1">
+              <label className="label mb-0">Description</label>
+              {description && (
+                <button onClick={() => setDescEditMode(v => !v)}
+                        className="text-[10px] text-gray-500 hover:text-gray-300 flex items-center gap-1 transition-colors">
+                  {descEditMode ? <><Eye size={10} /> Preview</> : <><Edit2 size={10} /> Edit</>}
+                </button>
+              )}
+            </div>
+            {!descEditMode ? (
+              <div
+                className="min-h-[64px] rounded-xl px-3 py-2.5 text-sm text-gray-300 leading-relaxed cursor-text"
+                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
+                onClick={() => canEdit && setDescEditMode(true)}
+                dangerouslySetInnerHTML={{ __html: description ? renderMarkdown(description) : '<span style="color:#4b5563;font-style:italic">Click to add description… (supports **markdown**)</span>' }}
+              />
+            ) : (
+              <textarea className="input resize-none h-28" placeholder="Add details… (**bold**, *italic*, `code`, [links](url))"
+                        value={description} onChange={e => setDescription(e.target.value)}
+                        onBlur={() => setDescEditMode(false)} autoFocus disabled={!canEdit} />
+            )}
+          </div>
+
+          {/* GitHub PR */}
+          <div>
+            <label className="label flex items-center gap-1"><Github size={11} /> GitHub PR</label>
+            <div className="flex gap-2">
+              <input className="input flex-1 text-sm" placeholder="https://github.com/org/repo/pull/123"
+                     value={githubPrUrl} onChange={e => setGithubPrUrl(e.target.value)} disabled={!canEdit} />
+              {prStatus && (
+                <a href={prStatus.html_url} target="_blank" rel="noopener noreferrer"
+                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 transition-all"
+                   style={prStatus.merged
+                     ? { background: 'rgba(139,92,246,0.15)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.3)' }
+                     : prStatus.state === 'open'
+                     ? { background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)' }
+                     : { background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>
+                  <Github size={11} />
+                  {prStatus.merged ? 'Merged' : prStatus.state === 'open' ? 'Open' : 'Closed'}
+                </a>
+              )}
+            </div>
+          </div>
+
+          {/* Recurrence */}
+          <div>
+            <label className="label flex items-center gap-1"><Repeat size={11} /> Recurrence</label>
+            <div className="flex gap-2">
+              {[{ id: '', label: 'None' }, { id: 'daily', label: 'Daily' }, { id: 'weekly', label: 'Weekly' }, { id: 'monthly', label: 'Monthly' }].map(opt => (
+                <button key={opt.id} type="button" onClick={() => canEdit && setRecurRule(opt.id)}
+                        disabled={!canEdit}
+                        className="text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
+                        style={recurRule === opt.id
+                          ? { background: 'rgba(41,82,255,0.2)', color: '#7ba3ff', border: '1px solid rgba(41,82,255,0.3)' }
+                          : { background: 'rgba(255,255,255,0.04)', color: 'rgba(107,114,128,0.8)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {recurRule && <p className="text-[11px] text-gray-500 mt-1.5">When completed, a new copy will auto-generate with the next due date.</p>}
+          </div>
+
+          {/* Dependencies */}
+          <div>
+            <label className="label flex items-center gap-1"><Lock size={11} /> Blocked by</label>
+            {blockedBy.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {blockedBy.map(depId => {
+                  const dep = tasks?.find(t => t.id === depId)
+                  if (!dep) return null
+                  const isDone = dep.status === 'done'
+                  return (
+                    <div key={depId} className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg"
+                         style={isDone
+                           ? { background: 'rgba(16,185,129,0.1)', color: '#34d399', border: '1px solid rgba(16,185,129,0.2)' }
+                           : { background: 'rgba(245,158,11,0.1)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.2)' }}>
+                      {isDone ? <Check size={10} /> : <Lock size={10} />}
+                      <span className="max-w-[160px] truncate">{dep.title}</span>
+                      {canEdit && (
+                        <button onClick={() => toggleBlockedBy(depId)} className="hover:text-red-400 ml-0.5"><X size={10} /></button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {canEdit && <DependencyPicker tasks={tasks} currentTaskId={task.id} blockedBy={blockedBy} onToggle={toggleBlockedBy} />}
+          </div>
+
+          {/* Attachments */}
+          <div>
+            <label className="label flex items-center gap-1"><Paperclip size={11} /> Attachments</label>
+            {loadingAtt ? (
+              <p className="text-xs text-gray-600">Loading…</p>
+            ) : (
+              <div className="space-y-1.5 mb-2">
+                {attachments.map(att => (
+                  <div key={att.id} className="flex items-center gap-3 px-3 py-2 rounded-lg group"
+                       style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                    <FileText size={13} className="text-gray-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <a href={att.url} target="_blank" rel="noopener noreferrer"
+                         className="text-sm text-brand-400 hover:text-brand-300 truncate block">{att.filename}</a>
+                      <p className="text-[10px] text-gray-600">
+                        {att.size_bytes ? `${(att.size_bytes / 1024).toFixed(1)} KB · ` : ''}
+                        {att.uploader?.full_name || att.uploader?.email}
+                      </p>
+                    </div>
+                    {canEdit && (
+                      <button onClick={() => deleteAttachment(att.id)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-gray-600 hover:text-red-400">
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {attachments.length === 0 && <p className="text-xs text-gray-700">No attachments yet</p>}
+              </div>
+            )}
+            {canEdit && (
+              <>
+                <input ref={fileInputRef} type="file" className="hidden" onChange={handleUploadFile} />
+                <button onClick={() => fileInputRef.current?.click()} disabled={uploadingAtt}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-all"
+                        style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(107,114,128,0.8)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <Upload size={11} />{uploadingAtt ? 'Uploading…' : 'Attach file'}
+                </button>
+              </>
+            )}
           </div>
 
           {/* Save */}
@@ -1761,6 +1981,13 @@ function BoardSettingsModal({ board, boardFields, onClose, onUpdate, onDelete, o
   // WIP limits state
   const [wipLimits, setWipLimits] = useState(board.settings?.wip_limits || {})
   const [savingWip, setSavingWip] = useState(false)
+  // Public share
+  const [publicToken, setPublicToken] = useState(board.public_token || null)
+  const [generatingToken, setGeneratingToken] = useState(false)
+  const [copied, setCopied] = useState(false)
+  // Inbox token
+  const inboxToken = board.inbox_token
+  const [copiedInbox, setCopiedInbox] = useState(false)
 
   // Add field state
   const [showAddField, setShowAddField]     = useState(false)
@@ -1872,6 +2099,67 @@ function BoardSettingsModal({ board, boardFields, onClose, onUpdate, onDelete, o
                   </button>
                 </div>
               </form>
+
+              {/* Public share link */}
+              <div className="mt-6 pt-5 border-t border-gray-800">
+                <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                  <Globe size={11} /> Public Share Link
+                </p>
+                {publicToken ? (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <input readOnly className="input flex-1 text-xs py-1.5 font-mono text-gray-400"
+                             value={`${typeof window !== 'undefined' ? window.location.origin : ''}/public/${publicToken}`} />
+                      <button onClick={() => {
+                        navigator.clipboard.writeText(`${window.location.origin}/public/${publicToken}`)
+                        setCopied(true); setTimeout(() => setCopied(false), 2000)
+                      }} className="btn-ghost px-3 text-xs">
+                        {copied ? <Check size={13} className="text-emerald-400" /> : 'Copy'}
+                      </button>
+                    </div>
+                    <button onClick={async () => {
+                      await apiFetch(`/api/boards/${board.id}/share`, { method: 'DELETE' })
+                      setPublicToken(null)
+                    }} className="text-xs text-red-400 hover:text-red-300 transition-colors">
+                      Revoke link
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={async () => {
+                    setGeneratingToken(true)
+                    const { data, ok } = await apiFetch(`/api/boards/${board.id}/share`, { method: 'POST' })
+                    if (ok) setPublicToken(data.public_token)
+                    setGeneratingToken(false)
+                  }} disabled={generatingToken}
+                  className="flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg w-full transition-colors"
+                  style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(156,163,175,0.8)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <Globe size={13} />{generatingToken ? 'Generating…' : 'Generate public link'}
+                  </button>
+                )}
+              </div>
+
+              {/* Email-to-task inbox */}
+              {inboxToken && (
+                <div className="mt-6 pt-5 border-t border-gray-800">
+                  <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                    <Mail size={11} /> Email-to-Task Inbox
+                  </p>
+                  <p className="text-xs text-gray-500 mb-2 leading-relaxed">
+                    Forward any email to this address and it will create a task on this board.
+                    Works with Resend inbound email — point your MX records or forward to:
+                  </p>
+                  <div className="flex gap-2">
+                    <input readOnly className="input flex-1 text-xs py-1.5 font-mono text-gray-400"
+                           value={`/api/inbox/${inboxToken}`} />
+                    <button onClick={() => {
+                      navigator.clipboard.writeText(`${typeof window !== 'undefined' ? window.location.origin : ''}/api/inbox/${inboxToken}`)
+                      setCopiedInbox(true); setTimeout(() => setCopiedInbox(false), 2000)
+                    }} className="btn-ghost px-3 text-xs">
+                      {copiedInbox ? <Check size={13} className="text-emerald-400" /> : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Duplicate board */}
               <div className="mt-6 pt-5 border-t border-gray-800">
@@ -2105,6 +2393,50 @@ function ActivityIcon({ action }) {
     <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0"
          style={{ background: `${color}20`, color }}>
       <Icon size={9} />
+    </div>
+  )
+}
+
+// ── Dependency Picker ──────────────────────────────────────────────────────────
+
+function DependencyPicker({ tasks, currentTaskId, blockedBy, onToggle }) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return []
+    return (tasks || [])
+      .filter(t => t.id !== currentTaskId && t.title.toLowerCase().includes(query.toLowerCase()))
+      .slice(0, 8)
+  }, [tasks, query, currentTaskId])
+
+  return (
+    <div className="relative">
+      <input className="input text-sm py-1.5" placeholder="Search tasks to block on…"
+             value={query} onChange={e => { setQuery(e.target.value); setOpen(true) }}
+             onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-xl shadow-2xl overflow-hidden"
+             style={{ background: 'rgba(14,14,26,0.98)', border: '1px solid rgba(255,255,255,0.1)' }}>
+          {filtered.map(t => {
+            const selected = blockedBy.includes(t.id)
+            return (
+              <button key={t.id} onMouseDown={() => { onToggle(t.id); setQuery('') }}
+                      className="w-full text-left flex items-center gap-2.5 px-3 py-2 transition-colors"
+                      style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(41,82,255,0.1)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <div className="w-3.5 h-3.5 rounded flex items-center justify-center shrink-0"
+                     style={selected ? { background: '#2952ff' } : { border: '1px solid rgba(107,114,128,0.5)' }}>
+                  {selected && <Check size={9} className="text-white" />}
+                </div>
+                <span className="text-sm text-gray-200 truncate">{t.title}</span>
+                <span className="text-[10px] text-gray-600 shrink-0 ml-auto">{t.status.replace('_', ' ')}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
