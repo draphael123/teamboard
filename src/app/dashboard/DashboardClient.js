@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, X, Layers } from 'lucide-react'
-import { createClient } from '@/lib/supabase'
 
 const BOARD_COLORS = [
   '#2952ff', '#8b5cf6', '#06b6d4', '#10b981',
@@ -26,18 +25,18 @@ export default function DashboardClient({ boards: initialBoards, user }) {
     setCreating(true)
     setError(null)
 
-    const supabase = createClient()
-    const { data: board, error: err } = await supabase
-      .from('boards')
-      .insert({ name: newName.trim(), description: newDesc.trim(), color: newColor, created_by: user.id })
-      .select()
-      .single()
+    // Route through server-side API to avoid PostgREST JWT verification issues
+    const res = await fetch('/api/boards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName.trim(), description: newDesc.trim(), color: newColor }),
+    })
 
-    if (err) { setError(err.message); setCreating(false); return }
+    const data = await res.json()
 
-    // Add creator as owner
-    await supabase.from('board_members').insert({ board_id: board.id, user_id: user.id, role: 'owner' })
+    if (!res.ok) { setError(data.error || 'Failed to create board'); setCreating(false); return }
 
+    const board = data
     setBoards(prev => [{ ...board, userRole: 'owner' }, ...prev])
     setShowCreate(false)
     setNewName('')
