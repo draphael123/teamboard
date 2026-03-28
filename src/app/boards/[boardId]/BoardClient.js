@@ -254,11 +254,28 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
   // WIP limits (from board settings)
   const wipLimits = board.settings?.wip_limits || {}
 
+  // Dark mode
+  const [darkMode, setDarkMode] = useState(() => {
+    if (typeof window === 'undefined') return true
+    const saved = localStorage.getItem('tb_dark_mode')
+    if (saved !== null) return saved === 'true'
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  })
+
+  // Shortcuts overlay
+  const [showShortcuts, setShowShortcuts] = useState(false)
+
   // DnD sensors
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
   const searchRef = useRef(null)
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
+
+  // Apply / remove dark mode class on <html>
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode)
+    localStorage.setItem('tb_dark_mode', String(darkMode))
+  }, [darkMode])
 
   useEffect(() => {
     function handleKeyDown(e) {
@@ -266,7 +283,7 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
       if (e.key === 'Escape') {
         setActiveTask(null); setShowNewTask(null)
         setShowInvite(false); setShowSettings(false); setShowNotifDropdown(false)
-        setShowAnalytics(false); setShowGlobalSearch(false)
+        setShowAnalytics(false); setShowGlobalSearch(false); setShowShortcuts(false)
         setBulkMode(false); setSelectedTaskIds(new Set())
         return
       }
@@ -276,6 +293,7 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); setShowNewTask('todo') }
       else if (e.key === '/') { e.preventDefault(); searchRef.current?.focus() }
+      else if (e.key === '?') { e.preventDefault(); setShowShortcuts(v => !v) }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
@@ -458,6 +476,16 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
     setEditingTaskId(null); setEditingTitle('')
   }
 
+  // ── Voting ────────────────────────────────────────────────────────────────
+
+  async function toggleVote(taskId) {
+    const { data, ok } = await apiFetch(`/api/boards/${boardId}/tasks/${taskId}/vote`, { method: 'POST' })
+    if (ok) {
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, votes: data.votes } : t))
+      if (activeTask?.id === taskId) setActiveTask(prev => ({ ...prev, votes: data.votes }))
+    }
+  }
+
   // ── Members ───────────────────────────────────────────────────────────────
 
   async function inviteMember(email) {
@@ -601,6 +629,16 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
             <Search size={16} />
           </button>
 
+          {/* Dark mode toggle */}
+          <button onClick={() => setDarkMode(v => !v)} className="btn-ghost p-2" title={darkMode ? 'Light mode' : 'Dark mode'}>
+            {darkMode ? <Eye size={16} /> : <EyeOff size={16} />}
+          </button>
+
+          {/* Keyboard shortcuts */}
+          <button onClick={() => setShowShortcuts(true)} className="btn-ghost p-2" title="Keyboard shortcuts (?)">
+            <Hash size={16} />
+          </button>
+
           {userRole === 'owner' && (
             <button onClick={() => setShowSettings(true)} className="btn-ghost p-2">
               <Settings size={16} />
@@ -727,7 +765,7 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
           boardFields={boardFields} currentUser={currentUser} canEdit={userRole !== 'viewer'}
           tasks={tasks}
           onClose={() => setActiveTask(null)} onUpdate={updateTask}
-          onDelete={deleteTask} onMove={moveTask} />
+          onDelete={deleteTask} onMove={moveTask} onVote={toggleVote} />
       )}
 
       {showInvite && <InviteModal onClose={() => setShowInvite(false)} onInvite={inviteMember} />}
@@ -761,6 +799,9 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
           onClear={() => setSelectedTaskIds(new Set())}
         />
       )}
+
+      {/* Keyboard shortcuts overlay */}
+      {showShortcuts && <ShortcutOverlay onClose={() => setShowShortcuts(false)} />}
     </div>
   )
 }
@@ -953,6 +994,11 @@ function DraggableTaskCard({ task, onClick, isDragging, columnColor,
                style={{ background: 'linear-gradient(135deg, #2952ff, #8b5cf6)' }}>
             {(task.assignee.full_name || task.assignee.email || '?')[0].toUpperCase()}
           </div>
+        )}
+        {task.votes?.length > 0 && (
+          <span className="text-[10px] font-medium text-gray-500 flex items-center gap-0.5 ml-auto">
+            ▲ {task.votes.length}
+          </span>
         )}
       </div>
     </div>
@@ -1395,7 +1441,7 @@ function NewTaskModal({ status, members, onClose, onCreate }) {
 
 // ── Task Detail Modal ──────────────────────────────────────────────────────────
 
-function TaskDetailModal({ task, boardId, members, boardFields, currentUser, canEdit, tasks, onClose, onUpdate, onDelete, onMove }) {
+function TaskDetailModal({ task, boardId, members, boardFields, currentUser, canEdit, tasks, onClose, onUpdate, onDelete, onMove, onVote }) {
   const [title, setTitle]               = useState(task.title)
   const [description, setDescription]   = useState(task.description || '')
   const [priority, setPriority]         = useState(task.priority)
@@ -1426,6 +1472,17 @@ function TaskDetailModal({ task, boardId, members, boardFields, currentUser, can
   const [loadingAtt, setLoadingAtt]           = useState(true)
   const [uploadingAtt, setUploadingAtt]       = useState(false)
   const fileInputRef = useRef(null)
+
+  // Time tracking
+  const [timeEntries, setTimeEntries]         = useState([])
+  const [loadingTime, setLoadingTime]         = useState(true)
+  const [timerRunning, setTimerRunning]       = useState(false)
+  const [timerSeconds, setTimerSeconds]       = useState(0)
+  const [activeEntryId, setActiveEntryId]     = useState(null)
+  const timerRef = useRef(null)
+
+  // Votes
+  const [votes, setVotes] = useState(task.votes || [])
 
   useEffect(() => {
     async function load() {
@@ -1458,6 +1515,55 @@ function TaskDetailModal({ task, boardId, members, boardFields, currentUser, can
     }
     loadAtt()
   }, [task.id, boardId])
+
+  // Load time entries
+  useEffect(() => {
+    async function loadTime() {
+      setLoadingTime(true)
+      const { data, ok } = await apiFetch(`/api/boards/${boardId}/tasks/${task.id}/time`)
+      if (ok) {
+        setTimeEntries(data || [])
+        const running = (data || []).find(e => !e.ended_at && e.user_id === currentUser?.id)
+        if (running) { setTimerRunning(true); setActiveEntryId(running.id) }
+      }
+      setLoadingTime(false)
+    }
+    loadTime()
+  }, [task.id, boardId, currentUser?.id])
+
+  // Live timer tick
+  useEffect(() => {
+    if (timerRunning) {
+      timerRef.current = setInterval(() => setTimerSeconds(s => s + 1), 1000)
+    } else {
+      clearInterval(timerRef.current); setTimerSeconds(0)
+    }
+    return () => clearInterval(timerRef.current)
+  }, [timerRunning])
+
+  async function startTimer() {
+    const { data, ok } = await apiFetch(`/api/boards/${boardId}/tasks/${task.id}/time`, { method: 'POST' })
+    if (ok) { setTimerRunning(true); setActiveEntryId(data.id); setTimeEntries(prev => [data, ...prev]) }
+  }
+
+  async function stopTimer() {
+    if (!activeEntryId) return
+    const { data, ok } = await apiFetch(`/api/time-entries/${activeEntryId}`, { method: 'PATCH', body: { stop: true } })
+    if (ok) {
+      setTimerRunning(false); setActiveEntryId(null)
+      setTimeEntries(prev => prev.map(e => e.id === activeEntryId ? data : e))
+    }
+  }
+
+  function fmtSeconds(s) {
+    if (!s) return '0:00'
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60
+    return h > 0
+      ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+      : `${m}:${String(sec).padStart(2,'0')}`
+  }
+
+  const totalTrackedSeconds = timeEntries.reduce((acc, e) => acc + (e.seconds || 0), 0)
 
   // Fetch GitHub PR status when URL is set
   useEffect(() => {
@@ -1764,6 +1870,57 @@ function TaskDetailModal({ task, boardId, members, boardFields, currentUser, can
             )}
           </div>
 
+          {/* Time Tracking */}
+          <div>
+            <label className="label flex items-center justify-between">
+              <span className="flex items-center gap-1"><Clock size={11} /> Time Tracking</span>
+              {totalTrackedSeconds > 0 && (
+                <span className="text-[10px] text-gray-500 font-mono">Total: {fmtSeconds(totalTrackedSeconds)}</span>
+              )}
+            </label>
+            <div className="flex items-center gap-2 mb-2">
+              {timerRunning ? (
+                <>
+                  <span className="text-sm font-mono text-brand-400 tabular-nums min-w-[4rem]">{fmtSeconds(timerSeconds)}</span>
+                  <button onClick={stopTimer}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-all"
+                          style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
+                    ■ Stop
+                  </button>
+                </>
+              ) : canEdit ? (
+                <button onClick={startTimer}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-all"
+                        style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(107,114,128,0.8)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <Clock size={11} /> Start timer
+                </button>
+              ) : null}
+            </div>
+            {!loadingTime && timeEntries.length > 0 && (
+              <div className="space-y-1">
+                {timeEntries.slice(0, 5).map(e => (
+                  <div key={e.id} className="flex items-center justify-between text-[11px] text-gray-500 px-2 py-1 rounded"
+                       style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <span className="font-mono">{e.seconds ? fmtSeconds(e.seconds) : (e.ended_at ? '—' : '▶ running')}</span>
+                    <span>{new Date(e.started_at).toLocaleDateString()}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Voting */}
+          <div>
+            <label className="label flex items-center gap-1">▲ Votes</label>
+            <button onClick={() => onVote && onVote(task.id)}
+                    className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg transition-all"
+                    style={votes.includes(currentUser?.id)
+                      ? { background: 'rgba(41,82,255,0.15)', color: '#7ba3ff', border: '1px solid rgba(41,82,255,0.3)' }
+                      : { background: 'rgba(255,255,255,0.04)', color: 'rgba(107,114,128,0.8)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              ▲ {votes.length > 0 ? `${votes.length} vote${votes.length !== 1 ? 's' : ''}` : 'Vote'}
+            </button>
+          </div>
+
           {/* Save */}
           {canEdit && (
             <button onClick={handleSave} className="btn-primary" disabled={saving}>
@@ -1988,6 +2145,22 @@ function BoardSettingsModal({ board, boardFields, onClose, onUpdate, onDelete, o
   // Inbox token
   const inboxToken = board.inbox_token
   const [copiedInbox, setCopiedInbox] = useState(false)
+  // Webhook
+  const [webhookUrl, setWebhookUrl]         = useState(board.webhook_url || '')
+  const [savingWebhook, setSavingWebhook]   = useState(false)
+  const [webhookSaved, setWebhookSaved]     = useState(false)
+  // Background
+  const [background, setBackground]         = useState(board.background || '')
+  const [savingBg, setSavingBg]             = useState(false)
+  const BACKGROUND_PRESETS = [
+    '', 'linear-gradient(135deg, #0f0c29, #302b63, #24243e)',
+    'linear-gradient(135deg, #0a0a0a, #1a1a2e)', 'linear-gradient(135deg, #1a1a2e, #16213e)',
+    'linear-gradient(135deg, #0d1117, #0d4f3c)', 'linear-gradient(135deg, #1a0028, #2d0045)',
+    '#07070f', '#0a1628',
+  ]
+  // Template
+  const [savingTemplate, setSavingTemplate] = useState(false)
+  const [templateSaved, setTemplateSaved]   = useState(false)
 
   // Add field state
   const [showAddField, setShowAddField]     = useState(false)
@@ -2180,6 +2353,70 @@ function BoardSettingsModal({ board, boardFields, onClose, onUpdate, onDelete, o
                     <Copy size={13} /> Empty copy
                   </button>
                 </div>
+              </div>
+
+              {/* Board Background */}
+              <div className="mt-6 pt-5 border-t border-gray-800">
+                <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-3">Board Background</p>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {BACKGROUND_PRESETS.map((bg, i) => (
+                    <button key={i} onClick={() => setBackground(bg)}
+                            className="w-8 h-8 rounded-lg transition-all hover:scale-110 ring-offset-gray-900"
+                            title={bg || 'Default'}
+                            style={{
+                              background: bg || '#07070f',
+                              border: background === bg ? '2px solid #7ba3ff' : '1px solid rgba(255,255,255,0.1)',
+                            }} />
+                  ))}
+                  <input value={background} onChange={e => setBackground(e.target.value)}
+                         placeholder="css gradient or hex" className="input flex-1 text-xs py-1" />
+                </div>
+                <button onClick={async () => {
+                  setSavingBg(true)
+                  await apiFetch(`/api/boards/${board.id}/background`, { method: 'PATCH', body: { background } })
+                  setSavingBg(false)
+                }} className="btn-ghost text-xs px-3 py-1.5" disabled={savingBg}>
+                  {savingBg ? 'Saving…' : 'Apply background'}
+                </button>
+              </div>
+
+              {/* Outbound Webhook */}
+              <div className="mt-6 pt-5 border-t border-gray-800">
+                <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-2 flex items-center gap-1">
+                  <ExternalLink size={11} /> Outbound Webhook
+                </p>
+                <p className="text-xs text-gray-600 mb-2">POST JSON to this URL on task create/update/delete.</p>
+                <div className="flex gap-2">
+                  <input className="input flex-1 text-xs py-1.5" placeholder="https://…" value={webhookUrl}
+                         onChange={e => setWebhookUrl(e.target.value)} />
+                  <button onClick={async () => {
+                    setSavingWebhook(true)
+                    if (webhookUrl.trim()) {
+                      await apiFetch(`/api/boards/${board.id}/webhook`, { method: 'POST', body: { url: webhookUrl.trim() } })
+                    } else {
+                      await apiFetch(`/api/boards/${board.id}/webhook`, { method: 'DELETE' })
+                    }
+                    setSavingWebhook(false); setWebhookSaved(true); setTimeout(() => setWebhookSaved(false), 2000)
+                  }} className="btn-ghost px-3 text-xs" disabled={savingWebhook}>
+                    {webhookSaved ? <Check size={13} className="text-emerald-400" /> : (savingWebhook ? '…' : 'Save')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Save as Template */}
+              <div className="mt-6 pt-5 border-t border-gray-800">
+                <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-3">Board Templates</p>
+                <button onClick={async () => {
+                  setSavingTemplate(true)
+                  await apiFetch(`/api/boards/${board.id}/template`, { method: 'POST', body: { template_name: board.name } })
+                  setSavingTemplate(false); setTemplateSaved(true); setTimeout(() => setTemplateSaved(false), 3000)
+                }} disabled={savingTemplate}
+                className="flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg w-full transition-colors"
+                style={{ background: 'rgba(139,92,246,0.08)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.2)' }}>
+                  <Copy size={13} />
+                  {templateSaved ? '✓ Saved as template!' : (savingTemplate ? 'Saving…' : 'Save as template')}
+                </button>
+                <p className="text-[11px] text-gray-600 mt-1.5">Saves columns only (no tasks). Use from the dashboard when creating a new board.</p>
               </div>
 
               {/* Danger zone */}
@@ -2577,6 +2814,45 @@ function SwimlaneKanban({ tasks, members, canEdit, onTaskClick, onAddTask, onMov
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// ── Shortcut Overlay ───────────────────────────────────────────────────────────
+
+function ShortcutOverlay({ onClose }) {
+  const shortcuts = [
+    { key: 'N', desc: 'New task' },
+    { key: '/', desc: 'Focus search bar' },
+    { key: '⌘K', desc: 'Global search' },
+    { key: '?', desc: 'Toggle shortcuts' },
+    { key: 'Esc', desc: 'Close modal / cancel' },
+    { key: 'Drag', desc: 'Move task between columns' },
+    { key: 'Double-click', desc: 'Inline edit task title' },
+    { key: 'B key (header)', desc: 'Toggle bulk select mode' },
+  ]
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+         onClick={onClose}>
+      <div className="card w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="font-semibold text-gray-100 flex items-center gap-2">
+            <Hash size={15} className="text-brand-400" /> Keyboard Shortcuts
+          </h2>
+          <button onClick={onClose} className="btn-ghost p-1.5"><X size={16} /></button>
+        </div>
+        <div className="space-y-2">
+          {shortcuts.map(({ key, desc }) => (
+            <div key={key} className="flex items-center justify-between gap-4">
+              <span className="text-xs text-gray-400">{desc}</span>
+              <kbd className="text-[11px] font-mono px-2 py-0.5 rounded"
+                   style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#d1d5db' }}>
+                {key}
+              </kbd>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

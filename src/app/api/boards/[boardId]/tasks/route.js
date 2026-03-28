@@ -74,5 +74,40 @@ export async function POST(request, { params }) {
     })
   } catch (_) {}
 
+  // Notify assigned user
+  if (assigned_to && assigned_to !== access.user.id) {
+    try {
+      const { data: board } = await access.admin
+        .from('boards')
+        .select('name, webhook_url')
+        .eq('id', params.boardId)
+        .single()
+
+      await access.admin.from('notifications').insert({
+        user_id: assigned_to,
+        board_id: params.boardId,
+        task_id: data.id,
+        type: 'assignment',
+        message: `You were assigned to "${data.title}" on board "${board?.name}"`,
+      })
+
+      // Fire outbound webhook
+      if (board?.webhook_url) {
+        fetch(board.webhook_url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-TeamBoard-Event': 'task.created' },
+          body: JSON.stringify({
+            event: 'task.created',
+            board_id: params.boardId,
+            board_name: board?.name,
+            task: { id: data.id, title: data.title, status: data.status, priority: data.priority, assigned_to: data.assigned_to },
+            actor_id: access.user.id,
+            timestamp: new Date().toISOString(),
+          }),
+        }).catch(() => {})
+      }
+    } catch (_) {}
+  }
+
   return NextResponse.json(data, { status: 201 })
 }

@@ -210,6 +210,11 @@ export default function MyTasksClient({ tasks, currentUser }) {
                               <CheckSquare size={9} /> {subtasksDone}/{subtasksTotal}
                             </span>
                           )}
+                          {task.votes?.length > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-gray-500">
+                              ▲ {task.votes.length}
+                            </span>
+                          )}
                           {(task.labels || []).map(l => (
                             <span key={l.id} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
                                   style={{ background: `${l.color}20`, color: l.color, border: `1px solid ${l.color}30` }}>

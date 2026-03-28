@@ -29,6 +29,26 @@ async function logActivity(admin, { taskId, boardId, userId, action, field, oldV
   } catch (_) { /* non-fatal */ }
 }
 
+// Fire outbound webhook (non-blocking)
+async function fireWebhook(webhookUrl, payload) {
+  if (!webhookUrl) return
+  try {
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-TeamBoard-Event': payload.event },
+      body: JSON.stringify(payload),
+    })
+  } catch (_) { /* non-fatal */ }
+}
+
+// Create in-app notification for a user
+async function createNotification(admin, { userId, boardId, taskId, type, message }) {
+  if (!userId) return
+  try {
+    await admin.from('notifications').insert({ user_id: userId, board_id: boardId, task_id: taskId, type, message })
+  } catch (_) { /* non-fatal */ }
+}
+
 // PATCH /api/boards/[boardId]/tasks/[taskId]
 export async function PATCH(request, { params }) {
   const access = await getBoardAccess(params.boardId)
@@ -37,11 +57,17 @@ export async function PATCH(request, { params }) {
 
   const updates = await request.json()
 
-  // Fetch current task to diff
+  // Fetch current task + board (for webhook URL)
   const { data: oldTask } = await access.admin
     .from('tasks')
     .select('status, assigned_to, priority, title, recur_rule, due_date, blocked_by')
     .eq('id', params.taskId)
+    .single()
+
+  const { data: board } = await access.admin
+    .from('boards')
+    .select('name, webhook_url')
+    .eq('id', params.boardId)
     .single()
 
   // Strip protected fields
@@ -51,7 +77,7 @@ export async function PATCH(request, { params }) {
   if (updates.status === 'done' && oldTask?.status !== 'done') {
     updates.completed_at = new Date().toISOString()
   } else if (updates.status && updates.status !== 'done' && oldTask?.status === 'done') {
-    updates.completed_at = null // un-completing
+    updates.completed_at = null
   }
 
   const { data, error } = await access.admin
@@ -64,7 +90,7 @@ export async function PATCH(request, { params }) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
-  // Recurring task: when moved to done, clone and reset for next occurrence
+  // Recurring task: when moved to done, clone for next occurrence
   if (updates.status === 'done' && oldTask?.status !== 'done' && oldTask?.recur_rule) {
     const nextDue = computeNextDue(oldTask.due_date, oldTask.recur_rule)
     await access.admin.from('tasks').insert({
@@ -76,7 +102,6 @@ export async function PATCH(request, { params }) {
       assigned_to: data.assigned_to,
       labels: data.labels,
       subtasks: (data.subtasks || []).map(s => ({ ...s, completed: false })),
-      custom_values: data.custom_values,
       recur_rule: oldTask.recur_rule,
       due_date: nextDue,
       status: 'todo',
@@ -91,6 +116,16 @@ export async function PATCH(request, { params }) {
     }
     if ('assigned_to' in updates && updates.assigned_to !== oldTask.assigned_to) {
       await logActivity(access.admin, { ...base, action: 'assigned', field: 'assigned_to', oldValue: oldTask.assigned_to, newValue: updates.assigned_to })
+      // Notify newly assigned user
+      if (updates.assigned_to && updates.assigned_to !== access.user.id) {
+        await createNotification(access.admin, {
+          userId: updates.assigned_to,
+          boardId: params.boardId,
+          taskId: params.taskId,
+          type: 'assignment',
+          message: `You were assigned to "${oldTask.title}" on board "${board?.name}"`,
+        })
+      }
     }
     if (updates.priority && updates.priority !== oldTask.priority) {
       await logActivity(access.admin, { ...base, action: 'updated', field: 'priority', oldValue: oldTask.priority, newValue: updates.priority })
@@ -99,6 +134,23 @@ export async function PATCH(request, { params }) {
       await logActivity(access.admin, { ...base, action: 'updated', field: 'title', oldValue: oldTask.title, newValue: updates.title })
     }
   }
+
+  // Fire outbound webhook (non-blocking)
+  fireWebhook(board?.webhook_url, {
+    event: 'task.updated',
+    board_id: params.boardId,
+    board_name: board?.name,
+    task: {
+      id: data.id,
+      title: data.title,
+      status: data.status,
+      priority: data.priority,
+      assigned_to: data.assigned_to,
+    },
+    changes: updates,
+    actor_id: access.user.id,
+    timestamp: new Date().toISOString(),
+  })
 
   return NextResponse.json(data)
 }
@@ -117,6 +169,19 @@ export async function DELETE(request, { params }) {
   if (!access) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (access.role === 'viewer') return NextResponse.json({ error: 'Viewers cannot delete tasks' }, { status: 403 })
 
+  // Fetch task + board for webhook
+  const { data: task } = await access.admin
+    .from('tasks')
+    .select('title, assigned_to')
+    .eq('id', params.taskId)
+    .single()
+
+  const { data: board } = await access.admin
+    .from('boards')
+    .select('name, webhook_url')
+    .eq('id', params.boardId)
+    .single()
+
   const { error } = await access.admin
     .from('tasks')
     .delete()
@@ -124,5 +189,16 @@ export async function DELETE(request, { params }) {
     .eq('board_id', params.boardId)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+  // Fire webhook
+  fireWebhook(board?.webhook_url, {
+    event: 'task.deleted',
+    board_id: params.boardId,
+    board_name: board?.name,
+    task: { id: params.taskId, title: task?.title },
+    actor_id: access.user.id,
+    timestamp: new Date().toISOString(),
+  })
+
   return NextResponse.json({ success: true })
 }
