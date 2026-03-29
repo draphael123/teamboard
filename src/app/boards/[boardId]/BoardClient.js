@@ -756,7 +756,7 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
 
       {/* Modals */}
       {showNewTask && (
-        <NewTaskModal status={showNewTask} members={members} onClose={() => setShowNewTask(null)}
+        <NewTaskModal status={showNewTask} members={members} boardFields={boardFields} onClose={() => setShowNewTask(null)}
           onCreate={async (data) => { const { ok } = await createTask(showNewTask, data); if (ok) setShowNewTask(null) }} />
       )}
 
@@ -1366,14 +1366,19 @@ function CalendarView({ tasks, onTaskClick }) {
 
 // ── New Task Modal ─────────────────────────────────────────────────────────────
 
-function NewTaskModal({ status, members, onClose, onCreate }) {
+function NewTaskModal({ status, members, boardFields = [], onClose, onCreate }) {
   const [title, setTitle]             = useState('')
   const [description, setDescription] = useState('')
   const [assignedTo, setAssignedTo]   = useState('')
   const [priority, setPriority]       = useState('medium')
   const [dueDate, setDueDate]         = useState('')
+  const [customValues, setCustomValues] = useState({})
   const [saving, setSaving]           = useState(false)
   const [error, setError]             = useState(null)
+
+  function setCustomValue(fieldId, value) {
+    setCustomValues(prev => ({ ...prev, [fieldId]: value }))
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -1382,6 +1387,7 @@ function NewTaskModal({ status, members, onClose, onCreate }) {
     const { ok, error: err } = await onCreate({
       title: title.trim(), description: description.trim(),
       assigned_to: assignedTo || null, priority, due_date: dueDate || null,
+      custom_values: customValues,
     })
     if (!ok) setError(err || 'Failed to create task')
     setSaving(false)
@@ -1391,7 +1397,7 @@ function NewTaskModal({ status, members, onClose, onCreate }) {
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="card w-full max-w-md p-6">
+      <div className="card w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
           <h2 className="font-semibold text-gray-100">New task · <span className="text-gray-400 font-normal">{colLabel}</span></h2>
           <button onClick={onClose} className="btn-ghost p-1.5"><X size={16} /></button>
@@ -1427,6 +1433,26 @@ function NewTaskModal({ status, members, onClose, onCreate }) {
               {members.map(m => <option key={m.id} value={m.id}>{m.full_name || m.email}</option>)}
             </select>
           </div>
+
+          {/* Custom fields */}
+          {boardFields.length > 0 && (
+            <div className="pt-2 border-t border-gray-800 space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-600">Custom fields</p>
+              {boardFields.map(field => (
+                <div key={field.id}>
+                  <label className="label flex items-center gap-1">
+                    <FieldIcon type={field.field_type} /> {field.name}
+                  </label>
+                  <FieldInput
+                    field={field}
+                    value={customValues[field.id]}
+                    onChange={val => setCustomValue(field.id, val)}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
             <button type="submit" className="btn-primary flex-1" disabled={saving || !title.trim()}>
