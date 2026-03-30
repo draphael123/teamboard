@@ -10,7 +10,7 @@ import {
   Hash, Link2, ToggleLeft, AlignLeft, ChevronDown,
   Sliders, Edit2, GripHorizontal, ArrowUpDown,
   ExternalLink, ChevronRight, ChevronLeft,
-  BarChart2, Download, Layers, Copy, Users, Activity,
+  BarChart2, Download, Layers, Copy, Users, Activity,h
   Clock, AlertTriangle, Lock, Repeat, Github, Paperclip,
   Upload, FileText, Eye, EyeOff, Mail, Globe,
 } from 'lucide-react'
@@ -27,7 +27,7 @@ function renderMarkdown(text) {
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:4px;font-family:monospace;font-size:0.85em">$1</code>')
     .replace(/^### (.+)$/gm, '<h3 style="font-size:0.9rem;font-weight:600;color:#d1d5db;margin:8px 0 4px">$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2 style="font-size:1rem;font-weight:600;color:#e5e7eb;margin:10px 0 4px">$1</h2>')
+    .replace(/^## (.+)$/gm, '<h2 style="font-size:1rem;font-weight:6h00;color:#e5e7eb;margin:10px 0 4px">$1</h2>')
     .replace(/^# (.+)$/gm, '<h1 style="font-size:1.1rem;font-weight:700;color:#f3f4f6;margin:12px 0 4px">$1</h1>')
     .replace(/^- (.+)$/gm, '<li style="margin:2px 0 2px 16px;list-style:disc">$1</li>')
     .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:#7ba3ff;text-decoration:underline">$1</a>')
@@ -1413,7 +1413,7 @@ function NewTaskModal({ status, members, boardFields = [], onClose, onCreate, bo
           <h2 className="font-semibold text-gray-100">New task · <span className="text-gray-400 font-normal">{colLabel}</span></h2>
           <button onClick={onClose} className="btn-ghost p-1.5"><X size={16} /></button>
         </div>
-            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-3 py-2 rounded-lg mb-4">{error}</div>}
+            {error && <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-3 py-2 rounded-lg mb-4">{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-4">
             {/* Template Picker */}
             <div className="flex items-center gap-2 mb-2">
@@ -2945,7 +2945,7 @@ function InviteModal({ onClose, onInvite }) {
           </div>
         ) : (
           <>
-            {error && <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-3 py-2 rounded-lg mb-4">{error}</div>}
+            {error && h
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="label">Email address</label>
