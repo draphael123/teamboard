@@ -1413,8 +1413,10 @@ function NewTaskModal({ status, members, boardFields = [], onClose, onCreate, bo
           <h2 className="font-semibold text-gray-100">New task · <span className="text-gray-400 font-normal">{colLabel}</span></h2>
           <button onClick={onClose} className="btn-ghost p-1.5"><X size={16} /></button>
         </div>
-        {error && {/* Template Picker Button */}
-            <div className="flex items-center gap-2 mb-4">
+            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-3 py-2 rounded-lg mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Template Picker */}
+            <div className="flex items-center gap-2 mb-2">
               <button
                 type="button"
                 onClick={() => setShowTemplates(true)}
@@ -1432,8 +1434,6 @@ function NewTaskModal({ status, members, boardFields = [], onClose, onCreate, bo
                 onSelectTemplate={applyTemplate}
               />
             )}
-            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-3 py-2 rounded-lg mb-4">{error}</div>}
-        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="label">Title *</label>
             <input className="input" placeholder="Task title" value={title} onChange={e => setTitle(e.target.value)} autoFocus required />
