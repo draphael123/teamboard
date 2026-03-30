@@ -11,7 +11,7 @@ const HOW_TO = [
     step: '01',
     icon: Kanban,
     title: 'Create a board',
-    desc: 'Pick a template — Sprint, Product Launch, Kanban Starter and more — or start blank.',
+    desc: 'Pick a template – Sprint, Product Launch, Kanban Starter and more – or start blank.',
     color: 'from-brand-500 to-violet-500',
   },
   {
@@ -68,43 +68,41 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex">
-
-      {/* ── Left panel ────────────────────────────────────────── */}
+      {/* Left panel ---------------------------------------------------- */}
       <div className="hidden lg:flex w-[55%] relative overflow-hidden flex-col justify-between p-12">
-        {/* Aurora blobs */}
-        <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute inset-0 overflow-hidden">
           <div className="absolute top-[-10%] left-[-10%] w-[55%] h-[55%] rounded-full opacity-30 blur-3xl"
-               style={{ background: 'radial-gradient(circle, #2952ff 0%, transparent 70%)' }} />
+            style={{ background: 'radial-gradient(circle, #29521f 0%, transparent 70%)' }} />
           <div className="absolute bottom-[-5%] right-[-5%] w-[50%] h-[50%] rounded-full opacity-20 blur-3xl"
-               style={{ background: 'radial-gradient(circle, #8b5cf6 0%, transparent 70%)' }} />
-          <div className="absolute top-[40%] right-[10%] w-[30%] h-[30%] rounded-full opacity-15 blur-3xl"
-               style={{ background: 'radial-gradient(circle, #06b6d4 0%, transparent 70%)' }} />
+            style={{ background: 'radial-gradient(circle, #405c16 0%, transparent 70%)' }} />
+          <div className="absolute top-[-10%] right-[-10%] w-[-10%] h-[10%] rounded-full opacity-15 blur-3xl"
+            style={{ background: 'radial-gradient(circle, #00b5d4 0%, transparent 70%)' }} />
         </div>
 
         {/* Grid overlay */}
         <div className="absolute inset-0 opacity-[0.03]"
-             style={{
-               backgroundImage: 'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
-               backgroundSize: '40px 40px',
-             }} />
+          style={{
+            backgroundImage: 'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
+            backgroundSize: '40px 40px',
+          }} />
 
         {/* Floating kanban mockup */}
-        <div className="absolute top-1/2 right-8 -translate-y-1/2 w-56 opacity-40 pointer-events-none select-none">
+        <div className="absolute top-1/2 right-0 -translate-y-1/2 w-56 opacity-40 pointer-events-none select-none">
           <div className="space-y-2">
             {[
-              { label: 'To Do', color: '#475569', tasks: ['Define scope', 'Research'] },
-              { label: 'In Progress', color: '#2952ff', tasks: ['Build MVP'] },
+              { label: 'To Do', color: '#4175d0', tasks: ['Define Scope', 'Research'] },
+              { label: 'In Progress', color: '#29521f', tasks: ['Build MVP'] },
               { label: 'Done', color: '#10b981', tasks: ['Kickoff', 'Planning'] },
             ].map(col => (
-              <div key={col.label} className="rounded-lg p-2.5"
-                   style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div key={col.label} className="rounded-lg p-3.5"
+                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
                 <div className="flex items-center gap-1.5 mb-2">
                   <div className="w-1.5 h-1.5 rounded-full" style={{ background: col.color }} />
                   <span className="text-[10px] font-semibold text-gray-400">{col.label}</span>
                 </div>
                 {col.tasks.map(t => (
                   <div key={t} className="rounded-md px-2 py-1.5 mb-1 text-[10px] text-gray-400"
-                       style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}>
                     {t}
                   </div>
                 ))}
@@ -136,11 +134,11 @@ export default function LoginPage() {
         <div className="relative z-10 space-y-4">
           <div className="glow-divider mb-6" />
           <p className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-4">How it works</p>
-          {HOW_TO.map(item => {
+          {HOW_TO.map((item, i) => {
             const Icon = item.icon
             return (
               <div key={item.step} className="flex items-start gap-4 group">
-                <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${item.color} flex items-center justify-center shrink-0 shadow-lg`}>
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br ${item.color} flex items-center justify-center shrink-0 shadow-lg ">
                   <Icon size={14} className="text-white" />
                 </div>
                 <div>
@@ -153,10 +151,9 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* ── Right panel — form ─────────────────────────────────── */}
+      {/* -- Right panel -- Form ------------------------------------- */}
       <div className="flex-1 flex items-center justify-center p-6 lg:p-12">
         <div className="w-full max-w-sm animate-fade-in">
-
           {/* Mobile logo */}
           <div className="flex items-center gap-2.5 justify-center mb-8 lg:hidden">
             <div className="w-9 h-9 logo-mark rounded-xl flex items-center justify-center">
@@ -173,7 +170,7 @@ export default function LoginPage() {
 
             {error && (
               <div className="mb-5 rounded-xl px-4 py-3 text-sm text-red-400"
-                   style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
                 {error}
               </div>
             )}
@@ -192,20 +189,30 @@ export default function LoginPage() {
                 <label className="label">Password</label>
                 <input
                   type="password" className="input"
-                  placeholder="••••••••"
+                  placeholder="********"
                   value={password} onChange={e => setPassword(e.target.value)}
                   required
                 />
               </div>
+
+              <div className="flex justify-end">
+                <Link
+                  href="/auth/forgot-password"
+                  className="text-xs font-medium text-gray-400 hover:text-white transition-colors"
+                >
+                  Forgot password?
+                </Link>
+              </div>
+
               <button type="submit" className="btn-primary w-full mt-2 gap-2" disabled={loading}>
-                {loading ? 'Signing in…' : <><span>Sign in</span><ArrowRight size={15} /></>}
+                {loading ? 'Signing in...' : <><span>Sign in</span><ArrowRight size={15} /></>}
               </button>
             </form>
           </div>
 
           <p className="text-center text-sm text-gray-600 mt-5">
             Don&apos;t have an account?{' '}
-            <Link href="/auth/signup" className="font-semibold" style={{ color: '#4d74ff' }}>
+            <Link href="/auth/signup" className="font-semibold" style={{ color: '#4de7ff' }}>
               Sign up free
             </Link>
           </p>
@@ -213,4 +220,4 @@ export default function LoginPage() {
       </div>
     </div>
   )
-}
+        }
