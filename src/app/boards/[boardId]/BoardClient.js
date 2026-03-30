@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import AnalyticsModal from './AnalyticsModal'
 import GlobalSearchModal from './GlobalSearchModal'
+import TaskTemplatesModal from './TaskTemplatesModal'
 
 // ── Simple markdown renderer ───────────────────────────────────────────────────
 function renderMarkdown(text) {
@@ -756,7 +757,7 @@ export default function BoardClient({ board: initialBoard, tasks: initialTasks, 
 
       {/* Modals */}
       {showNewTask && (
-        <NewTaskModal status={showNewTask} members={members} boardFields={boardFields} onClose={() => setShowNewTask(null)}
+        <NewTaskModal status={showNewTask} members={members} boardFields={boardFields} boardId={initialBoard.id} onClose={() => setShowNewTask(null)}
           onCreate={async (data) => { const { ok } = await createTask(showNewTask, data); if (ok) setShowNewTask(null) }} />
       )}
 
@@ -1366,7 +1367,17 @@ function CalendarView({ tasks, onTaskClick }) {
 
 // ── New Task Modal ─────────────────────────────────────────────────────────────
 
-function NewTaskModal({ status, members, boardFields = [], onClose, onCreate }) {
+function NewTaskModal({ status, members, boardFields = [], onClose, onCreate, boardId }) {
+  const [showTemplates, setShowTemplates] = useState(false)
+  
+  function applyTemplate(templateData) {
+    setTitle(templateData.title || '')
+    setDescription(templateData.description || '')
+    setStatus(templateData.status || status || 'todo')
+    setPriority(templateData.priority || 'medium')
+    if (templateData.custom_values) setCustomValues(templateData.custom_values)
+  }
+
   const [title, setTitle]             = useState('')
   const [description, setDescription] = useState('')
   const [assignedTo, setAssignedTo]   = useState('')
@@ -1402,7 +1413,26 @@ function NewTaskModal({ status, members, boardFields = [], onClose, onCreate }) 
           <h2 className="font-semibold text-gray-100">New task · <span className="text-gray-400 font-normal">{colLabel}</span></h2>
           <button onClick={onClose} className="btn-ghost p-1.5"><X size={16} /></button>
         </div>
-        {error && <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-3 py-2 rounded-lg mb-4">{error}</div>}
+        {error && {/* Template Picker Button */}
+            <div className="flex items-center gap-2 mb-4">
+              <button
+                type="button"
+                onClick={() => setShowTemplates(true)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/20 text-purple-400 hover:text-purple-300 transition-all text-xs font-medium"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                Use Template
+              </button>
+            </div>
+            {showTemplates && (
+              <TaskTemplatesModal
+                isOpen={showTemplates}
+                onClose={() => setShowTemplates(false)}
+                boardId={boardId}
+                onSelectTemplate={applyTemplate}
+              />
+            )}
+            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-3 py-2 rounded-lg mb-4">{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="label">Title *</label>
